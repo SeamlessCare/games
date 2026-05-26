@@ -1,0 +1,1413 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Cambio</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --felt: #1a5c2a;
+  --felt-dark: #134620;
+  --felt-light: #237a38;
+  --card-back: #1a2744;
+  --card-face: #fafafa;
+  --gold: #d4a843;
+  --red-suit: #c0392b;
+  --black-suit: #1a1a1a;
+  --glow-green: rgba(80, 220, 100, 0.6);
+  --glow-gold: rgba(212, 168, 67, 0.5);
+  --glow-snap: rgba(255, 80, 80, 0.7);
+  --card-w: 70px;
+  --card-h: 100px;
+  --card-radius: 8px;
+  --transition-fast: 0.2s;
+  --transition-med: 0.4s;
+}
+
+@media (min-width: 600px) {
+  :root { --card-w: 90px; --card-h: 130px; --card-radius: 10px; }
+}
+
+html, body {
+  height: 100%; overflow: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: var(--felt); color: #fff;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+}
+
+.screen { display: none; width: 100%; height: 100%; position: absolute; top: 0; left: 0; }
+.screen.active { display: flex; }
+
+/* ===== LOBBY ===== */
+#lobby-screen {
+  flex-direction: column; align-items: center; justify-content: center;
+  background: radial-gradient(ellipse at center, var(--felt-light) 0%, var(--felt-dark) 100%);
+}
+
+.lobby-card {
+  background: rgba(0,0,0,0.35); border-radius: 16px;
+  padding: 40px 32px; width: min(360px, 90vw);
+  backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.08);
+}
+
+.lobby-title {
+  font-size: 2.4rem; font-weight: 700; text-align: center;
+  margin-bottom: 4px; letter-spacing: 4px;
+  color: var(--gold); text-transform: uppercase;
+}
+
+.lobby-subtitle {
+  text-align: center; color: rgba(255,255,255,0.5);
+  font-size: 0.85rem; margin-bottom: 28px;
+}
+
+.lobby-card input {
+  width: 100%; padding: 12px 16px;
+  border: 1px solid rgba(255,255,255,0.15); border-radius: 8px;
+  background: rgba(255,255,255,0.08); color: #fff;
+  font-size: 1rem; outline: none; margin-bottom: 12px;
+  transition: border-color var(--transition-fast);
+}
+.lobby-card input:focus { border-color: var(--gold); }
+.lobby-card input::placeholder { color: rgba(255,255,255,0.35); }
+
+.lobby-divider {
+  display: flex; align-items: center; gap: 12px;
+  margin: 20px 0; color: rgba(255,255,255,0.3); font-size: 0.8rem;
+}
+.lobby-divider::before, .lobby-divider::after {
+  content: ''; flex: 1; height: 1px; background: rgba(255,255,255,0.15);
+}
+
+.btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 12px 24px; border: none; border-radius: 8px;
+  font-size: 1rem; font-weight: 600; cursor: pointer;
+  transition: all var(--transition-fast); min-height: 44px; min-width: 44px;
+}
+.btn:active { transform: scale(0.97); }
+
+.btn-primary {
+  background: linear-gradient(135deg, var(--gold) 0%, #b8912e 100%);
+  color: #1a1a1a; width: 100%;
+}
+.btn-primary:hover { filter: brightness(1.1); }
+.btn-primary:disabled { opacity: 0.4; cursor: default; filter: none; }
+
+.btn-secondary {
+  background: rgba(255,255,255,0.1); color: #fff;
+  border: 1px solid rgba(255,255,255,0.2); width: 100%;
+}
+.btn-secondary:hover { background: rgba(255,255,255,0.15); }
+
+.join-row { display: flex; gap: 8px; }
+.join-row input {
+  margin-bottom: 0; flex: 1; text-transform: uppercase;
+  letter-spacing: 2px; font-weight: 600; text-align: center;
+}
+.join-row .btn { width: auto; padding: 12px 20px; }
+
+/* ===== WAITING ===== */
+#waiting-screen {
+  flex-direction: column; align-items: center; justify-content: center;
+  background: radial-gradient(ellipse at center, var(--felt-light) 0%, var(--felt-dark) 100%);
+}
+
+.room-code-display {
+  font-size: 3rem; font-weight: 700; letter-spacing: 12px;
+  color: var(--gold); font-family: 'Courier New', monospace;
+  cursor: pointer; padding: 12px 24px; border-radius: 12px;
+  background: rgba(0,0,0,0.3); border: 2px dashed rgba(255,255,255,0.15);
+  transition: all var(--transition-fast); position: relative;
+}
+.room-code-display:hover { border-color: var(--gold); }
+.room-code-display .copy-hint {
+  position: absolute; bottom: -24px; left: 50%; transform: translateX(-50%);
+  font-size: 0.7rem; color: rgba(255,255,255,0.4); letter-spacing: 1px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+.waiting-text { margin-top: 32px; font-size: 1rem; color: rgba(255,255,255,0.6); }
+@keyframes waitingDots { 0%, 20% { content: '.'; } 40% { content: '..'; } 60%, 100% { content: '...'; } }
+.waiting-dots::after { content: ''; animation: waitingDots 1.5s infinite steps(1); }
+.waiting-back {
+  margin-top: 24px; background: none; border: none;
+  color: rgba(255,255,255,0.4); cursor: pointer; font-size: 0.85rem; padding: 8px;
+}
+
+/* ===== GAME ===== */
+#game-screen {
+  flex-direction: column;
+  background: radial-gradient(ellipse at 50% 50%, var(--felt-light) 0%, var(--felt) 40%, var(--felt-dark) 100%);
+  position: relative;
+}
+
+.game-header {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 8px 16px; background: rgba(0,0,0,0.25);
+  font-size: 0.8rem; flex-shrink: 0; z-index: 10;
+}
+.game-header .room-info { color: rgba(255,255,255,0.5); font-family: monospace; }
+.game-header .opponent-info { color: rgba(255,255,255,0.8); font-weight: 600; }
+.game-header .opponent-info.their-turn { color: var(--gold); }
+
+.game-area {
+  flex: 1; display: flex; flex-direction: column;
+  justify-content: space-between; padding: 8px 12px;
+  overflow: hidden; position: relative;
+}
+
+.hand-area {
+  display: flex; justify-content: center; align-items: center;
+  gap: 8px; padding: 8px 0; position: relative; flex-shrink: 0;
+  z-index: 1;
+}
+@media (min-width: 600px) { .hand-area { gap: 12px; } }
+
+.hand-area.active-turn { filter: drop-shadow(0 0 12px var(--glow-green)); }
+
+.hand-label {
+  position: absolute; font-size: 0.65rem; text-transform: uppercase;
+  letter-spacing: 2px; color: rgba(255,255,255,0.3);
+}
+.opponent-hand .hand-label { bottom: -2px; }
+.my-hand .hand-label { top: -2px; }
+
+.table-center {
+  flex: 1; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 12px; min-height: 0;
+  z-index: 2; position: relative;
+}
+
+.piles-row { display: flex; gap: 24px; align-items: center; justify-content: center; }
+@media (min-width: 600px) { .piles-row { gap: 40px; } }
+
+.pile-container { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.pile-label { font-size: 0.6rem; text-transform: uppercase; letter-spacing: 1.5px; color: rgba(255,255,255,0.35); }
+.pile-count { font-size: 0.6rem; color: rgba(255,255,255,0.3); }
+
+.draw-pile-card { position: relative; cursor: pointer; }
+.draw-pile-card::before, .draw-pile-card::after {
+  content: ''; position: absolute; width: 100%; height: 100%;
+  border-radius: var(--card-radius); background: var(--card-back);
+  border: 1px solid rgba(255,255,255,0.1);
+}
+.draw-pile-card::before { top: 3px; left: 1px; z-index: -2; opacity: 0.5; }
+.draw-pile-card::after { top: 1.5px; left: 0.5px; z-index: -1; opacity: 0.7; }
+
+.discard-pile-slot {
+  width: var(--card-w); height: var(--card-h); border-radius: var(--card-radius);
+  border: 2px dashed rgba(255,255,255,0.12);
+  display: flex; align-items: center; justify-content: center; position: relative;
+}
+.discard-pile-slot.has-card { border: none; }
+
+.status-area {
+  text-align: center; min-height: 48px;
+  display: flex; flex-direction: column; align-items: center;
+  justify-content: center; gap: 6px;
+}
+
+.status-text { font-size: 0.9rem; color: rgba(255,255,255,0.8); font-weight: 500; }
+
+.held-card-area {
+  display: flex; align-items: center; gap: 12px;
+  min-height: calc(var(--card-h) + 16px); justify-content: center;
+}
+.held-card-label { font-size: 0.7rem; color: rgba(255,255,255,0.5); }
+
+.action-buttons { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
+.action-buttons .btn { padding: 8px 20px; font-size: 0.85rem; min-width: 100px; }
+
+.btn-discard { background: rgba(192, 57, 43, 0.8); color: #fff; }
+.btn-discard:hover { background: rgba(192, 57, 43, 1); }
+.btn-swap { background: rgba(39, 174, 96, 0.8); color: #fff; }
+.btn-swap:hover { background: rgba(39, 174, 96, 1); }
+.btn-keep { background: rgba(255,255,255,0.15); color: #fff; }
+.btn-keep:hover { background: rgba(255,255,255,0.25); }
+
+.game-footer {
+  display: flex; justify-content: center;
+  padding: 8px 16px 12px; flex-shrink: 0; z-index: 10;
+}
+
+.btn-cambio {
+  background: linear-gradient(135deg, #c0392b 0%, #922b21 100%);
+  color: #fff; padding: 10px 32px; font-size: 0.9rem;
+  letter-spacing: 2px; text-transform: uppercase;
+  border-radius: 24px; box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+}
+.btn-cambio:hover:not(:disabled) { box-shadow: 0 0 16px rgba(192, 57, 43, 0.5); }
+.btn-cambio:disabled { opacity: 0.25; cursor: default; box-shadow: none; }
+
+/* ===== CARDS ===== */
+.card {
+  width: var(--card-w); height: var(--card-h); border-radius: var(--card-radius);
+  position: relative; cursor: default; perspective: 600px; flex-shrink: 0;
+}
+.card-inner {
+  width: 100%; height: 100%; position: relative;
+  transform-style: preserve-3d; transition: transform var(--transition-med) ease;
+  border-radius: var(--card-radius);
+}
+.card.flipped .card-inner { transform: rotateY(180deg); }
+
+.card-front, .card-back {
+  position: absolute; width: 100%; height: 100%;
+  border-radius: var(--card-radius); backface-visibility: hidden;
+  display: flex; flex-direction: column; overflow: hidden;
+}
+
+.card-back {
+  background: linear-gradient(145deg, var(--card-back) 0%, #0f1a30 100%);
+  border: 2px solid rgba(255,255,255,0.08); z-index: 1;
+}
+.card-back-pattern {
+  position: absolute; inset: 4px;
+  border-radius: calc(var(--card-radius) - 4px);
+  border: 1px solid rgba(255,255,255,0.06);
+  background:
+    repeating-linear-gradient(45deg, transparent, transparent 6px, rgba(255,255,255,0.02) 6px, rgba(255,255,255,0.02) 7px),
+    repeating-linear-gradient(-45deg, transparent, transparent 6px, rgba(255,255,255,0.02) 6px, rgba(255,255,255,0.02) 7px);
+}
+.card-back-center {
+  position: absolute; top: 50%; left: 50%;
+  width: 28px; height: 28px;
+  border: 2px solid rgba(255,255,255,0.08);
+  transform: translate(-50%, -50%) rotate(45deg);
+}
+
+.card-front {
+  background: var(--card-face); border: 1px solid #ddd;
+  transform: rotateY(180deg); padding: 4px; justify-content: space-between;
+}
+
+.card-rank-top { display: flex; flex-direction: column; align-items: flex-start; line-height: 1; padding: 2px; }
+.card-rank-bottom { display: flex; flex-direction: column; align-items: flex-end; line-height: 1; padding: 2px; transform: rotate(180deg); }
+.card-rank { font-size: calc(var(--card-w) * 0.22); font-weight: 700; }
+.card-suit-small { font-size: calc(var(--card-w) * 0.17); line-height: 1; }
+.card-suit-center {
+  position: absolute; top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: calc(var(--card-w) * 0.42); opacity: 0.9;
+}
+
+.card.red .card-front { color: var(--red-suit); }
+.card.black .card-front { color: var(--black-suit); }
+.card.joker .card-front { color: var(--gold); }
+
+.card-joker-text {
+  position: absolute; top: 50%; left: 50%;
+  transform: translate(-50%, -50%); text-align: center; line-height: 1.1;
+}
+.card-joker-star { font-size: calc(var(--card-w) * 0.35); }
+.card-joker-label { font-size: calc(var(--card-w) * 0.13); font-weight: 700; letter-spacing: 1px; }
+
+.card.clickable { cursor: pointer; transition: transform var(--transition-fast), box-shadow var(--transition-fast); }
+.card.clickable:hover { transform: translateY(-4px); z-index: 5; }
+.card.clickable:hover .card-inner { box-shadow: 0 6px 20px rgba(0,0,0,0.4); border-radius: var(--card-radius); }
+
+.card.glow-green { animation: glowGreen 1.2s ease-in-out infinite alternate; }
+.card.glow-gold { animation: glowGold 1.2s ease-in-out infinite alternate; }
+.card.glow-snap { animation: glowSnap 0.6s ease-in-out infinite alternate; }
+
+@keyframes glowGreen { from { filter: drop-shadow(0 0 4px transparent); } to { filter: drop-shadow(0 0 10px var(--glow-green)); } }
+@keyframes glowGold { from { filter: drop-shadow(0 0 4px transparent); } to { filter: drop-shadow(0 0 10px var(--glow-gold)); } }
+@keyframes glowSnap { from { filter: drop-shadow(0 0 4px transparent); transform: scale(1); } to { filter: drop-shadow(0 0 12px var(--glow-snap)); transform: scale(1.03); } }
+
+.card .known-dot {
+  position: absolute; top: 4px; right: 4px;
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--gold); z-index: 10; opacity: 0.8;
+}
+
+.card.empty { border: 2px dashed rgba(255,255,255,0.1); border-radius: var(--card-radius); background: transparent; }
+.card.empty .card-inner { display: none; }
+.card.removed-anim { opacity: 0; transform: scale(0.5); transition: all 0.4s ease; }
+
+/* ===== MODE SELECTOR ===== */
+.mode-selector {
+  display: flex; gap: 0; margin-bottom: 16px;
+  border-radius: 8px; overflow: hidden;
+  border: 1px solid rgba(255,255,255,0.15);
+}
+.mode-btn {
+  flex: 1; padding: 10px 16px; border: none;
+  background: rgba(255,255,255,0.05); color: rgba(255,255,255,0.5);
+  font-size: 0.85rem; font-weight: 600; cursor: pointer;
+  transition: all 0.2s;
+}
+.mode-btn.active {
+  background: linear-gradient(135deg, var(--gold) 0%, #b8912e 100%);
+  color: #1a1a1a;
+}
+.mode-btn:hover:not(.active) { background: rgba(255,255,255,0.1); }
+
+.waiting-mode {
+  font-size: 0.8rem; color: rgba(255,255,255,0.4); margin-top: 8px;
+  letter-spacing: 1px; text-transform: uppercase;
+}
+
+.mode-badge {
+  font-size: 0.7rem; color: rgba(255,255,255,0.4);
+  margin-left: 6px; letter-spacing: 1px;
+}
+
+/* ===== GAME OVER ===== */
+#gameover-overlay {
+  display: none; position: fixed; inset: 0;
+  background: rgba(0,0,0,0.75); z-index: 100;
+  flex-direction: column; align-items: center; justify-content: center;
+  backdrop-filter: blur(4px);
+}
+#gameover-overlay.active { display: flex; }
+
+.gameover-card {
+  background: rgba(0,0,0,0.5); border-radius: 16px;
+  padding: 32px 28px; width: min(400px, 92vw);
+  text-align: center; border: 1px solid rgba(255,255,255,0.1);
+}
+.gameover-result { font-size: 1.8rem; font-weight: 700; margin-bottom: 8px; }
+.gameover-result.win { color: var(--gold); }
+.gameover-result.lose { color: var(--red-suit); }
+.gameover-result.tie { color: rgba(255,255,255,0.7); }
+
+.gameover-scores { display: flex; justify-content: center; gap: 32px; margin: 20px 0; }
+.gameover-player { text-align: center; }
+.gameover-player-name { font-size: 0.8rem; color: rgba(255,255,255,0.5); margin-bottom: 4px; }
+.gameover-player-score { font-size: 2.2rem; font-weight: 700; }
+
+.gameover-hands { display: flex; justify-content: center; gap: 24px; margin: 16px 0; flex-wrap: wrap; }
+.gameover-hand { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.gameover-hand-label { font-size: 0.7rem; color: rgba(255,255,255,0.4); }
+.gameover-hand-cards { display: flex; gap: 4px; }
+.gameover-hand-cards .card { --card-w: 55px; --card-h: 80px; }
+@media (min-width: 600px) { .gameover-hand-cards .card { --card-w: 70px; --card-h: 100px; } }
+
+.btn-play-again {
+  margin-top: 20px;
+  background: linear-gradient(135deg, var(--gold) 0%, #b8912e 100%);
+  color: #1a1a1a; padding: 12px 32px;
+}
+
+/* ===== TOAST ===== */
+.toast-container {
+  position: fixed; top: 60px; left: 50%; transform: translateX(-50%);
+  z-index: 200; display: flex; flex-direction: column; gap: 8px; pointer-events: none;
+}
+.toast {
+  background: rgba(0,0,0,0.85); color: #fff;
+  padding: 10px 20px; border-radius: 8px; font-size: 0.85rem;
+  animation: toastIn 0.3s ease, toastOut 0.3s ease 2.7s forwards;
+  pointer-events: none; white-space: nowrap;
+}
+.toast.error { border-left: 3px solid var(--red-suit); }
+.toast.info { border-left: 3px solid var(--gold); }
+.toast.success { border-left: 3px solid #27ae60; }
+
+@keyframes toastIn { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes toastOut { from { opacity: 1; } to { opacity: 0; } }
+
+/* ===== CAMBIO ANNOUNCE ===== */
+.cambio-announce {
+  position: fixed; inset: 0; z-index: 90;
+  display: none; align-items: center; justify-content: center; pointer-events: none;
+}
+.cambio-announce.active { display: flex; animation: cambioFlash 0.8s ease; }
+.cambio-announce-text {
+  font-size: 3rem; font-weight: 800; color: var(--gold);
+  text-transform: uppercase; letter-spacing: 8px;
+  text-shadow: 0 0 30px rgba(212,168,67,0.6), 0 4px 12px rgba(0,0,0,0.5);
+}
+@keyframes cambioFlash { 0% { background: rgba(212,168,67,0.15); } 50% { background: rgba(212,168,67,0.08); } 100% { background: transparent; } }
+
+@media (max-height: 600px) {
+  .game-header { padding: 4px 12px; }
+  .game-area { padding: 4px 8px; }
+  .hand-area { padding: 4px 0; }
+  .game-footer { padding: 4px 12px 8px; }
+}
+</style>
+</head>
+<body>
+
+<div id="lobby-screen" class="screen active">
+  <div class="lobby-card">
+    <div class="lobby-title">Cambio</div>
+    <div class="lobby-subtitle">The card game of memory and deception</div>
+    <input type="text" id="player-name" placeholder="Your name" maxlength="16" autocomplete="off" />
+    <div class="mode-selector">
+      <button class="mode-btn active" id="mode-classic" data-mode="classic">Classic</button>
+      <button class="mode-btn" id="mode-steroids" data-mode="steroids">Steroids</button>
+    </div>
+    <button class="btn btn-primary" id="create-room-btn">Create Room</button>
+    <div class="lobby-divider">or join a room</div>
+    <div class="join-row">
+      <input type="text" id="room-code-input" placeholder="CODE" maxlength="4" autocomplete="off" />
+      <button class="btn btn-secondary" id="join-room-btn">Join</button>
+    </div>
+  </div>
+</div>
+
+<div id="waiting-screen" class="screen">
+  <div class="room-code-display" id="waiting-room-code">
+    ----<span class="copy-hint">tap to copy</span>
+  </div>
+  <div class="waiting-mode" id="waiting-mode">Classic</div>
+  <div class="waiting-text">Waiting for opponent<span class="waiting-dots"></span></div>
+  <button class="waiting-back" id="waiting-back-btn">Back to lobby</button>
+</div>
+
+<div id="game-screen" class="screen">
+  <div class="game-header">
+    <span class="room-info" id="game-room-info">Room: ----</span>
+    <span class="opponent-info" id="game-opponent-info">Opponent</span>
+  </div>
+  <div class="game-area">
+    <div class="hand-area opponent-hand" id="opponent-hand-area">
+      <span class="hand-label" id="opponent-hand-label"></span>
+    </div>
+    <div class="table-center">
+      <div class="piles-row">
+        <div class="pile-container">
+          <div class="pile-label">Draw</div>
+          <div class="draw-pile-card" id="draw-pile"></div>
+          <div class="pile-count" id="draw-pile-count"></div>
+        </div>
+        <div class="pile-container">
+          <div class="pile-label">Discard</div>
+          <div class="discard-pile-slot" id="discard-pile"></div>
+        </div>
+      </div>
+      <div class="status-area">
+        <div class="status-text" id="status-text"></div>
+        <div class="held-card-area" id="held-card-area" style="display:none;">
+          <span class="held-card-label">Drawn:</span>
+          <div id="held-card-slot"></div>
+          <div class="action-buttons" id="held-actions"></div>
+        </div>
+        <div class="action-buttons" id="power-actions" style="display:none;"></div>
+      </div>
+    </div>
+    <div class="hand-area my-hand" id="my-hand-area">
+      <span class="hand-label" id="my-hand-label"></span>
+    </div>
+  </div>
+  <div class="game-footer">
+    <button class="btn btn-cambio" id="cambio-btn" disabled>Cambio</button>
+  </div>
+</div>
+
+<div id="gameover-overlay">
+  <div class="gameover-card">
+    <div class="gameover-result" id="gameover-result"></div>
+    <div class="gameover-scores" id="gameover-scores"></div>
+    <div class="gameover-hands" id="gameover-hands"></div>
+    <button class="btn btn-play-again" id="play-again-btn">Play Again</button>
+  </div>
+</div>
+
+<div class="cambio-announce" id="cambio-announce">
+  <div class="cambio-announce-text">CAMBIO!</div>
+</div>
+
+<div class="toast-container" id="toast-container"></div>
+
+<script>
+const S = {
+  ws: null,
+  clientId: localStorage.getItem('cambio_clientId'),
+  roomCode: localStorage.getItem('cambio_roomCode'),
+  playerIndex: null,
+  playerName: localStorage.getItem('cambio_playerName') || '',
+  opponentName: '',
+  myHand: [],
+  opponentHand: [],
+  topDiscard: null,
+  drawnCard: null,
+  drawnSource: null,
+  isMyTurn: false,
+  turnPhase: null,
+  gamePhase: 'lobby',
+  snapWindowOpen: false,
+  cardsRemaining: 0,
+  activePower: null,
+  knownCards: {},
+  opponentKnownCards: {},
+  mode: 'classic',
+  reconnectTimer: null,
+  reconnectAttempts: 0,
+  peekTimers: [],
+};
+
+const $ = id => document.getElementById(id);
+
+const screens = { lobby: $('lobby-screen'), waiting: $('waiting-screen'), game: $('game-screen') };
+
+function showScreen(name) {
+  Object.values(screens).forEach(s => s.classList.remove('active'));
+  screens[name].classList.add('active');
+  $('gameover-overlay').classList.remove('active');
+}
+
+function toast(msg, type = 'info') {
+  const el = document.createElement('div');
+  el.className = `toast ${type}`;
+  el.textContent = msg;
+  $('toast-container').appendChild(el);
+  setTimeout(() => el.remove(), 3000);
+}
+
+const SUIT_SYM = { spades: '♠', hearts: '♥', diamonds: '♦', clubs: '♣', joker: '★' };
+function suitColor(suit) { return (suit === 'hearts' || suit === 'diamonds') ? 'red' : suit === 'joker' ? 'joker' : 'black'; }
+
+function makeCard(card, faceUp) {
+  const el = document.createElement('div');
+  el.className = 'card';
+
+  if (!card && !faceUp) {
+    el.innerHTML = '<div class="card-inner"><div class="card-back"><div class="card-back-pattern"></div><div class="card-back-center"></div></div><div class="card-front"></div></div>';
+    return el;
+  }
+
+  if (!card) { el.classList.add('empty'); el.innerHTML = '<div class="card-inner"></div>'; return el; }
+
+  el.classList.add(suitColor(card.suit));
+  const isJoker = card.rank === 'Joker';
+  const sym = SUIT_SYM[card.suit] || '';
+  const rk = isJoker ? 'JKR' : card.rank;
+
+  let front;
+  if (isJoker) {
+    front = '<div class="card-joker-text"><div class="card-joker-star">★</div><div class="card-joker-label">JOKER</div></div>';
+  } else {
+    front = `<div class="card-rank-top"><span class="card-rank">${rk}</span><span class="card-suit-small">${sym}</span></div><div class="card-suit-center">${sym}</div><div class="card-rank-bottom"><span class="card-rank">${rk}</span><span class="card-suit-small">${sym}</span></div>`;
+  }
+
+  el.innerHTML = `<div class="card-inner"><div class="card-back"><div class="card-back-pattern"></div><div class="card-back-center"></div></div><div class="card-front">${front}</div></div>`;
+  if (faceUp) el.classList.add('flipped');
+  return el;
+}
+
+// ===== RENDER =====
+
+function render() {
+  const modeLabel = S.mode === 'steroids' ? ' · Steroids' : '';
+  $('game-room-info').textContent = `Room: ${S.roomCode || '----'}${modeLabel}`;
+  const oi = $('game-opponent-info');
+  oi.textContent = S.opponentName || 'Opponent';
+  oi.classList.toggle('their-turn', !S.isMyTurn && (S.gamePhase === 'playing' || S.gamePhase === 'cambio_round'));
+
+  renderHand('opponent');
+  renderHand('self');
+  renderPiles();
+  renderHeldCard();
+  renderPowerActions();
+  renderStatus();
+
+  $('cambio-btn').disabled = !(S.isMyTurn && S.turnPhase === 'waiting_for_draw' && S.gamePhase === 'playing');
+}
+
+function renderHand(who) {
+  const isSelf = who === 'self';
+  const area = $(isSelf ? 'my-hand-area' : 'opponent-hand-area');
+  const label = $(isSelf ? 'my-hand-label' : 'opponent-hand-label');
+  const hand = isSelf ? S.myHand : S.opponentHand;
+  const known = isSelf ? S.knownCards : S.opponentKnownCards;
+
+  label.textContent = isSelf ? (S.playerName || 'You') : (S.opponentName || 'Opponent');
+  area.classList.toggle('active-turn', isSelf ? S.isMyTurn : !S.isMyTurn);
+
+  [...area.children].forEach(c => { if (c !== label) c.remove(); });
+
+  hand.forEach((slot, i) => {
+    let el;
+    if (slot.removed) {
+      el = document.createElement('div');
+      el.className = 'card empty';
+      el.innerHTML = '<div class="card-inner"></div>';
+    } else if (slot.faceUp && slot.card) {
+      el = makeCard(slot.card, true);
+    } else {
+      el = makeCard(null, false);
+    }
+
+    if (!slot.removed && !slot.faceUp && known[i]) {
+      const dot = document.createElement('div');
+      dot.className = 'known-dot';
+      el.appendChild(dot);
+    }
+
+    if (isSelf) {
+      if (canClickMy(i)) {
+        el.classList.add('clickable');
+        if (S.turnPhase === 'drawn_from_pile' || S.turnPhase === 'drawn_from_discard') el.classList.add('glow-green');
+        if (S.activePower && S.activePower.type === '7_8') el.classList.add('glow-green');
+        if (S.activePower && S.activePower.type === 'JQ' && S.activePower.step === 1) el.classList.add('glow-green');
+        if (S.activePower && S.activePower.type === 'K' && S.activePower.step === 2) el.classList.add('glow-green');
+        if (S.activePower && S.activePower.type === 'JKR_discard2') el.classList.add('glow-green');
+        if (S.activePower && S.activePower.type === '3_give') el.classList.add('glow-green');
+        if (S.activePower && S.activePower.type === 'J_peek_both' && S.activePower.step === 'self') el.classList.add('glow-green');
+        el.addEventListener('click', () => onMyCard(i));
+      }
+      if (S.snapWindowOpen && !slot.removed) {
+        el.classList.add('glow-snap', 'clickable');
+        el.addEventListener('click', () => wsSend({ type: 'snap', index: i }));
+      }
+    } else {
+      if (canClickOpp(i)) {
+        el.classList.add('clickable');
+        if (S.activePower && S.activePower.type === '2_steal') el.classList.add('glow-gold');
+        else el.classList.add('glow-gold');
+        el.addEventListener('click', () => onOppCard(i));
+      }
+    }
+
+    area.appendChild(el);
+  });
+}
+
+function renderPiles() {
+  const dp = $('draw-pile');
+  dp.innerHTML = '';
+  if (S.cardsRemaining > 0) {
+    const card = makeCard(null, false);
+    card.classList.add('clickable');
+    if (canDraw()) card.addEventListener('click', () => wsSend({ type: 'draw', source: 'pile' }));
+    else card.classList.remove('clickable');
+    dp.appendChild(card);
+  }
+  $('draw-pile-count').textContent = S.cardsRemaining > 0 ? `${S.cardsRemaining} left` : 'empty';
+
+  const disc = $('discard-pile');
+  disc.innerHTML = '';
+  if (S.topDiscard) {
+    disc.classList.add('has-card');
+    const card = makeCard(S.topDiscard, true);
+    if (canDraw() && S.topDiscard) {
+      card.classList.add('clickable');
+      card.addEventListener('click', () => wsSend({ type: 'draw', source: 'discard' }));
+    }
+    disc.appendChild(card);
+  } else {
+    disc.classList.remove('has-card');
+  }
+}
+
+function renderHeldCard() {
+  const area = $('held-card-area');
+  const slot = $('held-card-slot');
+  const actions = $('held-actions');
+  slot.innerHTML = '';
+  actions.innerHTML = '';
+
+  if (S.drawnCard) {
+    area.style.display = 'flex';
+    slot.appendChild(makeCard(S.drawnCard, true));
+    if (S.drawnSource === 'pile') {
+      const btn = document.createElement('button');
+      btn.className = 'btn btn-discard';
+      btn.textContent = 'Discard';
+      btn.addEventListener('click', () => {
+        wsSend({ type: 'discard_drawn' });
+        S.drawnCard = null;
+        S.drawnSource = null;
+      });
+      actions.appendChild(btn);
+    }
+  } else {
+    area.style.display = 'none';
+  }
+}
+
+function renderPowerActions() {
+  const pa = $('power-actions');
+  pa.innerHTML = '';
+  pa.style.display = 'none';
+
+  if (S.activePower && S.activePower.type === 'K' && S.activePower.step === 1 && S.activePower.peekedCard) {
+    pa.style.display = 'flex';
+
+    const swapBtn = document.createElement('button');
+    swapBtn.className = 'btn btn-swap';
+    swapBtn.textContent = 'Swap';
+    swapBtn.addEventListener('click', () => { S.activePower.step = 2; render(); });
+
+    const keepBtn = document.createElement('button');
+    keepBtn.className = 'btn btn-keep';
+    keepBtn.textContent = 'Keep';
+    keepBtn.addEventListener('click', () => {
+      wsSend({ type: 'king_keep' });
+      S.activePower = null;
+      render();
+    });
+
+    pa.appendChild(swapBtn);
+    pa.appendChild(keepBtn);
+  }
+}
+
+function renderStatus() {
+  let text = '';
+  if (S.gamePhase === 'peek') { text = 'Memorize your cards!'; }
+  else if (S.snapWindowOpen) { text = 'SNAP! Click a matching card!'; }
+  else if (S.activePower) {
+    const p = S.activePower;
+    if (p.type === '7_8') text = 'Peek: click one of your cards';
+    else if (p.type === '9_10') text = "Spy: click an opponent's card";
+    else if (p.type === 'JQ' && p.step === 1) text = 'Swap: click one of your cards first';
+    else if (p.type === 'JQ' && p.step === 2) text = "Swap: now click an opponent's card";
+    else if (p.type === 'K' && p.step === 0) text = "King: click an opponent's card to peek";
+    else if (p.type === 'K' && p.step === 1) text = 'King: swap with your card, or keep?';
+    else if (p.type === 'K' && p.step === 2) text = 'King: click your card to swap';
+    else if (p.type === 'A_peek_all') text = 'Ace! Viewing all cards...';
+    else if (p.type === 'JKR_discard2') text = `Joker! Click a card to remove (${p.selectionsLeft} left)`;
+    else if (p.type === '2_steal') text = "Steal! Click an opponent's card to take";
+    else if (p.type === '3_give') text = 'Give! Click your card to give away';
+    else if (p.type === 'J_peek_both' && p.step === 'self') text = 'Jack: peek one of your cards';
+    else if (p.type === 'J_peek_both' && p.step === 'opp') text = "Jack: now peek an opponent's card";
+  } else if (!S.isMyTurn) {
+    text = S.opponentName ? `${S.opponentName}'s turn` : "Opponent's turn";
+    if (S.gamePhase === 'cambio_round') text += ' (final round)';
+  } else if (S.turnPhase === 'waiting_for_draw') {
+    text = 'Your turn, draw a card';
+    if (S.gamePhase === 'cambio_round') text = 'Your final turn!';
+  } else if (S.turnPhase === 'drawn_from_pile') {
+    text = 'Swap with a card or discard';
+  } else if (S.turnPhase === 'drawn_from_discard') {
+    text = 'Click a card to swap';
+  }
+  $('status-text').textContent = text;
+}
+
+// ===== GUARDS =====
+
+function canDraw() {
+  return S.isMyTurn && S.turnPhase === 'waiting_for_draw' && !S.snapWindowOpen && !S.activePower;
+}
+
+function canClickMy(i) {
+  if (S.myHand[i] && S.myHand[i].removed) return false;
+  if (S.snapWindowOpen) return false;
+  if (S.activePower) {
+    const p = S.activePower;
+    return p.type === '7_8' || (p.type === 'JQ' && p.step === 1) || (p.type === 'K' && p.step === 2)
+      || p.type === 'JKR_discard2' || p.type === '3_give' || (p.type === 'J_peek_both' && p.step === 'self');
+  }
+  return S.drawnCard && (S.turnPhase === 'drawn_from_pile' || S.turnPhase === 'drawn_from_discard');
+}
+
+function canClickOpp(i) {
+  if (S.opponentHand[i] && S.opponentHand[i].removed) return false;
+  if (S.snapWindowOpen || !S.activePower) return false;
+  const p = S.activePower;
+  return p.type === '9_10' || (p.type === 'JQ' && p.step === 2) || (p.type === 'K' && p.step === 0)
+    || p.type === '2_steal' || (p.type === 'J_peek_both' && p.step === 'opp');
+}
+
+// ===== CLICK HANDLERS =====
+
+function onMyCard(i) {
+  if (S.activePower) {
+    const p = S.activePower;
+    if (p.type === '7_8') {
+      wsSend({ type: 'power_target', target: 'self', index: i });
+      S.activePower = null;
+      return;
+    }
+    if (p.type === 'JQ' && p.step === 1) {
+      S.activePower.myIndex = i;
+      S.activePower.step = 2;
+      render();
+      return;
+    }
+    if (p.type === 'K' && p.step === 2) {
+      wsSend({ type: 'king_swap', myIndex: i, oppIndex: S.activePower.oppIndex });
+      S.activePower = null;
+      return;
+    }
+    if (p.type === 'JKR_discard2') {
+      wsSend({ type: 'joker_select', index: i });
+      S.activePower.selectionsLeft--;
+      if (S.activePower.selectionsLeft <= 0) S.activePower = null;
+      return;
+    }
+    if (p.type === '3_give') {
+      wsSend({ type: 'give_target', index: i });
+      S.activePower = null;
+      return;
+    }
+    if (p.type === 'J_peek_both' && p.step === 'self') {
+      wsSend({ type: 'power_target', target: 'self', index: i });
+      return;
+    }
+    return;
+  }
+  if (S.drawnCard) {
+    wsSend({ type: 'swap', index: i });
+    S.knownCards[i] = S.drawnCard;
+    S.drawnCard = null;
+    S.drawnSource = null;
+  }
+}
+
+function onOppCard(i) {
+  if (!S.activePower) return;
+  const p = S.activePower;
+  if (p.type === '9_10') {
+    wsSend({ type: 'power_target', target: 'opponent', index: i });
+    S.activePower = null;
+    return;
+  }
+  if (p.type === 'JQ' && p.step === 2) {
+    wsSend({ type: 'power_swap', myIndex: p.myIndex, oppIndex: i });
+    S.activePower = null;
+    return;
+  }
+  if (p.type === 'K' && p.step === 0) {
+    wsSend({ type: 'king_peek', oppIndex: i });
+    S.activePower.oppIndex = i;
+    S.activePower.step = 1;
+    return;
+  }
+  if (p.type === '2_steal') {
+    wsSend({ type: 'steal_target', index: i });
+    S.activePower = null;
+    return;
+  }
+  if (p.type === 'J_peek_both' && p.step === 'opp') {
+    wsSend({ type: 'power_target', target: 'opponent', index: i });
+    S.activePower = null;
+    return;
+  }
+}
+
+// ===== PEEK ANIMATION =====
+
+function peekCard(target, index, card, duration) {
+  const hand = target === 'self' ? S.myHand : S.opponentHand;
+  const known = target === 'self' ? S.knownCards : S.opponentKnownCards;
+  if (!hand[index]) return;
+  hand[index].faceUp = true;
+  hand[index].card = card;
+  known[index] = card;
+  render();
+  const t = setTimeout(() => {
+    if (hand[index]) hand[index].faceUp = false;
+    render();
+  }, duration || 3000);
+  S.peekTimers.push(t);
+}
+
+// ===== WEBSOCKET =====
+
+function connect() {
+  const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
+  const ws = new WebSocket(`${protocol}://${location.host}`);
+  S.ws = ws;
+
+  ws.onopen = () => {
+    S.reconnectAttempts = 0;
+    if (S.reconnectTimer) { clearInterval(S.reconnectTimer); S.reconnectTimer = null; }
+    if (S.clientId && S.roomCode) {
+      wsSend({ type: 'reconnect', clientId: S.clientId });
+    }
+  };
+
+  ws.onclose = () => {
+    if (!S.reconnectTimer && S.roomCode) {
+      S.reconnectTimer = setInterval(() => {
+        S.reconnectAttempts++;
+        if (S.reconnectAttempts > 15) {
+          clearInterval(S.reconnectTimer);
+          S.reconnectTimer = null;
+          toast('Connection lost', 'error');
+          return;
+        }
+        connect();
+      }, 2000);
+    }
+  };
+
+  ws.onerror = () => {};
+  ws.onmessage = (e) => {
+    try { handleMsg(JSON.parse(e.data)); } catch {}
+  };
+}
+
+function wsSend(msg) {
+  if (S.ws && S.ws.readyState === WebSocket.OPEN) S.ws.send(JSON.stringify(msg));
+}
+
+// ===== MESSAGE HANDLERS =====
+
+function handleMsg(msg) {
+  switch (msg.type) {
+    case 'room_created':
+      S.clientId = msg.clientId;
+      S.roomCode = msg.roomCode;
+      S.playerIndex = msg.playerIndex;
+      localStorage.setItem('cambio_clientId', msg.clientId);
+      localStorage.setItem('cambio_roomCode', msg.roomCode);
+      $('waiting-room-code').firstChild.textContent = msg.roomCode;
+      $('waiting-mode').textContent = S.mode === 'steroids' ? 'Steroids' : 'Classic';
+      showScreen('waiting');
+      break;
+
+    case 'room_joined':
+      S.clientId = msg.clientId;
+      S.roomCode = msg.roomCode;
+      S.playerIndex = msg.playerIndex;
+      S.opponentName = msg.opponentName || 'Opponent';
+      if (msg.mode) S.mode = msg.mode;
+      localStorage.setItem('cambio_clientId', msg.clientId);
+      localStorage.setItem('cambio_roomCode', msg.roomCode);
+      $('waiting-room-code').firstChild.textContent = msg.roomCode;
+      $('waiting-mode').textContent = S.mode === 'steroids' ? 'Steroids' : 'Classic';
+      showScreen('waiting');
+      break;
+
+    case 'player_joined':
+      S.opponentName = msg.playerName;
+      toast(`${msg.playerName} joined!`, 'success');
+      break;
+
+    case 'game_start':
+      S.gamePhase = 'playing';
+      if (msg.mode) S.mode = msg.mode;
+      S.playerIndex = msg.yourIndex;
+      S.myHand = Array(4).fill(null).map(() => ({ faceUp: false, card: null, removed: false }));
+      S.opponentHand = Array(msg.opponentHandSize || 4).fill(null).map(() => ({ faceUp: false, card: null, removed: false }));
+      S.topDiscard = msg.topDiscard || null;
+      S.cardsRemaining = msg.cardsRemaining || 0;
+      S.drawnCard = null; S.drawnSource = null;
+      S.activePower = null; S.snapWindowOpen = false;
+      S.knownCards = {}; S.opponentKnownCards = {};
+      S.peekTimers.forEach(t => clearTimeout(t));
+      S.peekTimers = [];
+      showScreen('game');
+      render();
+      break;
+
+    case 'initial_peek':
+      S.gamePhase = 'peek';
+      (msg.cards || []).forEach(c => {
+        if (S.myHand[c.index]) {
+          S.myHand[c.index].card = c.card;
+          S.myHand[c.index].faceUp = true;
+          S.knownCards[c.index] = c.card;
+        }
+      });
+      render();
+      break;
+
+    case 'peek_end':
+      S.gamePhase = 'playing';
+      S.myHand.forEach(s => { s.faceUp = false; });
+      render();
+      break;
+
+    case 'your_turn':
+      S.isMyTurn = true;
+      S.turnPhase = 'waiting_for_draw';
+      S.drawnCard = null; S.drawnSource = null; S.activePower = null;
+      render();
+      break;
+
+    case 'opponent_turn':
+      S.isMyTurn = false;
+      S.turnPhase = null;
+      S.drawnCard = null; S.drawnSource = null; S.activePower = null;
+      render();
+      break;
+
+    case 'card_drawn':
+      S.drawnCard = msg.card;
+      S.drawnSource = msg.source;
+      S.turnPhase = msg.source === 'pile' ? 'drawn_from_pile' : 'drawn_from_discard';
+      if (msg.source === 'discard') S.topDiscard = null;
+      if (msg.cardsRemaining !== undefined) S.cardsRemaining = msg.cardsRemaining;
+      render();
+      break;
+
+    case 'opponent_drew':
+      if (msg.source === 'discard') S.topDiscard = null;
+      if (msg.cardsRemaining !== undefined) S.cardsRemaining = msg.cardsRemaining;
+      render();
+      break;
+
+    case 'card_swapped': {
+      S.topDiscard = msg.discardedCard;
+      if (msg.player === 'self') {
+        if (S.myHand[msg.index]) {
+          S.myHand[msg.index].card = msg.discardedCard;
+          S.myHand[msg.index].faceUp = true;
+        }
+        S.drawnCard = null; S.drawnSource = null;
+        render();
+        setTimeout(() => {
+          if (S.myHand[msg.index]) S.myHand[msg.index].faceUp = false;
+          render();
+        }, 800);
+      } else {
+        delete S.opponentKnownCards[msg.index];
+        render();
+      }
+      break;
+    }
+
+    case 'card_discarded':
+      S.topDiscard = msg.card;
+      S.drawnCard = null; S.drawnSource = null;
+      if (msg.cardsRemaining !== undefined) S.cardsRemaining = msg.cardsRemaining;
+      render();
+      break;
+
+    case 'power_activate':
+      switch (msg.power) {
+        case 'A_peek_all': S.activePower = { type: 'A_peek_all' }; break;
+        case 'JKR_discard2': S.activePower = { type: 'JKR_discard2', selectionsLeft: 2, step: 0 }; break;
+        case '2_steal': S.activePower = { type: '2_steal' }; break;
+        case '3_give': S.activePower = { type: '3_give' }; break;
+        case 'J_peek_both': S.activePower = { type: 'J_peek_both', step: 'self' }; break;
+        default: S.activePower = { type: msg.power, step: msg.power === 'JQ' ? 1 : 0 }; break;
+      }
+      render();
+      break;
+
+    case 'jack_peek_step':
+      if (S.activePower && S.activePower.type === 'J_peek_both') {
+        S.activePower.step = msg.step;
+        render();
+      }
+      break;
+
+    case 'peek_result':
+      peekCard(msg.target, msg.index, msg.card, msg.duration || 3000);
+      break;
+
+    case 'king_peek_result':
+      if (S.activePower) {
+        S.activePower.peekedCard = msg.card;
+        S.activePower.step = 1;
+      }
+      peekCard('opponent', msg.index, msg.card, msg.duration || 5000);
+      render();
+      break;
+
+    case 'power_swap_done':
+      if (msg.myIndex !== undefined && msg.oppIndex !== undefined) {
+        const mk = S.knownCards[msg.myIndex];
+        const ok = S.opponentKnownCards[msg.oppIndex];
+        if (ok) S.knownCards[msg.myIndex] = ok; else delete S.knownCards[msg.myIndex];
+        if (mk) S.opponentKnownCards[msg.oppIndex] = mk; else delete S.opponentKnownCards[msg.oppIndex];
+      }
+      S.activePower = null;
+      toast('Cards swapped!', 'info');
+      render();
+      break;
+
+    case 'king_swap_done':
+      if (S.activePower && msg.myIndex !== undefined) {
+        S.knownCards[msg.myIndex] = S.activePower.peekedCard;
+        if (msg.oppIndex !== undefined) delete S.opponentKnownCards[msg.oppIndex];
+      }
+      S.activePower = null;
+      render();
+      break;
+
+    case 'peek_all_result': {
+      const allCards = (msg.cards || []);
+      allCards.forEach(c => {
+        const hand = c.owner === 'self' ? S.myHand : S.opponentHand;
+        const known = c.owner === 'self' ? S.knownCards : S.opponentKnownCards;
+        if (hand[c.index]) {
+          hand[c.index].faceUp = true;
+          hand[c.index].card = c.card;
+          known[c.index] = c.card;
+        }
+      });
+      render();
+      const t = setTimeout(() => {
+        S.myHand.forEach(s => { if (s) s.faceUp = false; });
+        S.opponentHand.forEach(s => { if (s) s.faceUp = false; });
+        S.activePower = null;
+        render();
+      }, 5000);
+      S.peekTimers.push(t);
+      break;
+    }
+
+    case 'joker_card_removed': {
+      const isSelf = msg.player === 'self';
+      const hand = isSelf ? S.myHand : S.opponentHand;
+      const known = isSelf ? S.knownCards : S.opponentKnownCards;
+      if (hand[msg.index]) hand[msg.index].removed = true;
+      delete known[msg.index];
+      if (S.activePower && S.activePower.type === 'JKR_discard2') {
+        S.activePower.selectionsLeft = msg.selectionsLeft !== undefined ? msg.selectionsLeft : S.activePower.selectionsLeft;
+        if (S.activePower.selectionsLeft <= 0) S.activePower = null;
+      }
+      render();
+      break;
+    }
+
+    case 'steal_done': {
+      const isSelf = msg.player === 'self';
+      if (isSelf) {
+        S.myHand.push({ faceUp: false, card: null, removed: false });
+        if (S.opponentHand[msg.oppIndex]) S.opponentHand[msg.oppIndex].removed = true;
+        delete S.opponentKnownCards[msg.oppIndex];
+      } else {
+        S.opponentHand.push({ faceUp: false, card: null, removed: false });
+        if (S.myHand[msg.oppIndex]) S.myHand[msg.oppIndex].removed = true;
+        delete S.knownCards[msg.oppIndex];
+      }
+      S.activePower = null;
+      toast(isSelf ? 'Card stolen!' : `${S.opponentName} stole a card!`, 'info');
+      render();
+      break;
+    }
+
+    case 'give_done': {
+      const isSelf = msg.player === 'self';
+      if (isSelf) {
+        if (S.myHand[msg.myIndex]) S.myHand[msg.myIndex].removed = true;
+        delete S.knownCards[msg.myIndex];
+        S.opponentHand.push({ faceUp: false, card: null, removed: false });
+      } else {
+        if (S.opponentHand[msg.myIndex]) S.opponentHand[msg.myIndex].removed = true;
+        delete S.opponentKnownCards[msg.myIndex];
+        S.myHand.push({ faceUp: false, card: null, removed: false });
+      }
+      S.activePower = null;
+      toast(isSelf ? 'Card given away!' : `${S.opponentName} gave you a card!`, 'info');
+      render();
+      break;
+    }
+
+    case 'deck_give_done': {
+      const isSelf = msg.player === 'self';
+      if (isSelf) {
+        S.opponentHand.push({ faceUp: false, card: null, removed: false });
+      } else {
+        S.myHand.push({ faceUp: false, card: null, removed: false });
+      }
+      toast(isSelf ? 'Opponent gets a deck card!' : 'You got a deck card!', 'info');
+      render();
+      break;
+    }
+
+    case 'self_draw_done': {
+      const isSelf = msg.player === 'self';
+      if (isSelf) {
+        S.myHand.push({ faceUp: false, card: null, removed: false });
+      } else {
+        S.opponentHand.push({ faceUp: false, card: null, removed: false });
+      }
+      toast(isSelf ? 'Drew a card from the deck!' : `${S.opponentName} drew a card!`, 'info');
+      render();
+      break;
+    }
+
+    case 'skip_done':
+      toast('Turn skipped!', 'info');
+      render();
+      break;
+
+    case 'turn_skipped': {
+      const isSelf = msg.player === 'self';
+      toast(isSelf ? 'Your turn was skipped!' : "Opponent's turn skipped!", 'info');
+      render();
+      break;
+    }
+
+    case 'snap_window':
+      S.snapWindowOpen = msg.open;
+      if (msg.topDiscard) S.topDiscard = msg.topDiscard;
+      render();
+      break;
+
+    case 'snap_result': {
+      const isSelf = msg.player === 'self';
+      if (msg.success) {
+        const hand = isSelf ? S.myHand : S.opponentHand;
+        const known = isSelf ? S.knownCards : S.opponentKnownCards;
+        if (hand[msg.index]) hand[msg.index].removed = true;
+        delete known[msg.index];
+        toast(isSelf ? 'Snap! Card removed!' : `${S.opponentName} snapped!`, isSelf ? 'success' : 'info');
+      } else {
+        if (isSelf) {
+          S.myHand.push({ faceUp: false, card: null, removed: false });
+          toast('Wrong snap! Penalty card.', 'error');
+        } else {
+          S.opponentHand.push({ faceUp: false, card: null, removed: false });
+          toast(`${S.opponentName} wrong snap!`, 'info');
+        }
+      }
+      if (msg.topDiscard) S.topDiscard = msg.topDiscard;
+      S.snapWindowOpen = false;
+      render();
+      break;
+    }
+
+    case 'cambio_called': {
+      const caller = msg.player === 'self' ? 'You' : S.opponentName;
+      S.gamePhase = 'cambio_round';
+      const ann = $('cambio-announce');
+      ann.classList.add('active');
+      setTimeout(() => ann.classList.remove('active'), 2000);
+      toast(`${caller} called Cambio!`, 'info');
+      render();
+      break;
+    }
+
+    case 'final_turn':
+      render();
+      break;
+
+    case 'game_over':
+      S.gamePhase = 'game_over';
+      showGameOver(msg);
+      break;
+
+    case 'opponent_disconnected':
+      toast(`${S.opponentName || 'Opponent'} disconnected`, 'error');
+      break;
+
+    case 'opponent_reconnected':
+      toast(`${S.opponentName || 'Opponent'} reconnected`, 'success');
+      break;
+
+    case 'reconnect_success':
+      S.gamePhase = msg.gamePhase || 'playing';
+      if (msg.mode) S.mode = msg.mode;
+      S.playerIndex = msg.playerIndex;
+      S.opponentName = msg.opponentName || 'Opponent';
+      S.isMyTurn = msg.isMyTurn || false;
+      S.turnPhase = msg.turnPhase || null;
+      S.myHand = (msg.myHand || []).map(s => ({ faceUp: false, card: null, removed: s.removed || false }));
+      S.opponentHand = (msg.opponentHand || []).map(s => ({ faceUp: false, card: null, removed: s.removed || false }));
+      S.topDiscard = msg.topDiscard || null;
+      S.cardsRemaining = msg.cardsRemaining || 0;
+      S.drawnCard = null; S.drawnSource = null;
+      S.activePower = null; S.snapWindowOpen = false;
+      showScreen('game');
+      render();
+      toast('Reconnected!', 'success');
+      break;
+
+    case 'error':
+      if (msg.message === 'Session expired' || msg.message === 'Room gone' || msg.message === 'Player not found') {
+        S.roomCode = null;
+        S.clientId = null;
+        localStorage.removeItem('cambio_roomCode');
+        localStorage.removeItem('cambio_clientId');
+      }
+      toast(msg.message || 'Something went wrong', 'error');
+      break;
+  }
+}
+
+// ===== GAME OVER =====
+
+function showGameOver(msg) {
+  const overlay = $('gameover-overlay');
+  const resultEl = $('gameover-result');
+  const iWin = msg.winner === 'self';
+  const tie = msg.winner === 'tie';
+
+  resultEl.textContent = tie ? 'Tie Game!' : iWin ? 'You Win!' : 'You Lose';
+  resultEl.className = `gameover-result ${tie ? 'tie' : iWin ? 'win' : 'lose'}`;
+
+  $('gameover-scores').innerHTML = `
+    <div class="gameover-player">
+      <div class="gameover-player-name">${S.playerName || 'You'}</div>
+      <div class="gameover-player-score" style="color:${iWin || tie ? 'var(--gold)' : 'var(--red-suit)'}">${msg.myScore}</div>
+    </div>
+    <div class="gameover-player">
+      <div class="gameover-player-name">${S.opponentName}</div>
+      <div class="gameover-player-score" style="color:${!iWin || tie ? 'var(--gold)' : 'var(--red-suit)'}">${msg.opponentScore}</div>
+    </div>`;
+
+  const handsEl = $('gameover-hands');
+  handsEl.innerHTML = '';
+
+  [{ label: S.playerName || 'You', cards: msg.myCards },
+   { label: S.opponentName, cards: msg.opponentCards }].forEach(h => {
+    const div = document.createElement('div');
+    div.className = 'gameover-hand';
+    div.innerHTML = `<div class="gameover-hand-label">${h.label}</div>`;
+    const cardsDiv = document.createElement('div');
+    cardsDiv.className = 'gameover-hand-cards';
+    (h.cards || []).forEach(card => { if (card) cardsDiv.appendChild(makeCard(card, true)); });
+    div.appendChild(cardsDiv);
+    handsEl.appendChild(div);
+  });
+
+  overlay.classList.add('active');
+}
+
+// ===== LOBBY HANDLERS =====
+
+$('player-name').value = S.playerName;
+
+$('create-room-btn').addEventListener('click', () => {
+  const name = $('player-name').value.trim();
+  if (!name) { toast('Enter your name', 'error'); $('player-name').focus(); return; }
+  S.playerName = name;
+  localStorage.setItem('cambio_playerName', name);
+  wsSend({ type: 'create_room', playerName: name, mode: S.mode });
+});
+
+$('join-room-btn').addEventListener('click', () => {
+  const name = $('player-name').value.trim();
+  const code = $('room-code-input').value.trim().toUpperCase();
+  if (!name) { toast('Enter your name', 'error'); $('player-name').focus(); return; }
+  if (!code || code.length < 4) { toast('Enter a 4-letter room code', 'error'); $('room-code-input').focus(); return; }
+  S.playerName = name;
+  localStorage.setItem('cambio_playerName', name);
+  wsSend({ type: 'join_room', playerName: name, roomCode: code });
+});
+
+$('player-name').addEventListener('keydown', e => { if (e.key === 'Enter') $('create-room-btn').click(); });
+$('room-code-input').addEventListener('keydown', e => { if (e.key === 'Enter') $('join-room-btn').click(); });
+
+$('waiting-room-code').addEventListener('click', () => {
+  if (S.roomCode) navigator.clipboard.writeText(S.roomCode).then(() => toast('Code copied!', 'success')).catch(() => {});
+});
+
+$('waiting-back-btn').addEventListener('click', () => { S.roomCode = null; localStorage.removeItem('cambio_roomCode'); showScreen('lobby'); });
+
+$('cambio-btn').addEventListener('click', () => {
+  if (S.isMyTurn && S.turnPhase === 'waiting_for_draw' && S.gamePhase === 'playing') {
+    wsSend({ type: 'call_cambio' });
+  }
+});
+
+$('play-again-btn').addEventListener('click', () => {
+  wsSend({ type: 'play_again' });
+  $('gameover-overlay').classList.remove('active');
+  S.gamePhase = 'waiting';
+  S.knownCards = {}; S.opponentKnownCards = {};
+  S.peekTimers.forEach(t => clearTimeout(t));
+  S.peekTimers = [];
+  toast('Waiting for opponent...', 'info');
+});
+
+document.querySelectorAll('.mode-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    S.mode = btn.dataset.mode;
+  });
+});
+
+connect();
+</script>
+</body>
+</html>
