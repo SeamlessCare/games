@@ -5,8 +5,8 @@ const { WebSocketServer } = require('ws');
 const crypto = require('crypto');
 
 const PORT = process.env.PORT || 3000;
-const PEEK_DURATION = 5000;
-const SNAP_WINDOW_DURATION = 2000;
+const PEEK_DURATION = 8000;
+const SNAP_WINDOW_DURATION = 5000;
 const RECONNECT_GRACE_PERIOD = 60000;
 const POWER_PEEK_DURATION = 3000;
 
@@ -154,7 +154,7 @@ function powerToClientName(power) {
 
 // --- Game flow ---
 
-function startGame(game) {
+function dealAndWaitForReady(game) {
   game.deck = shuffle(buildDeck());
   game.discardPile = [];
   game.currentTurn = 0;
@@ -167,6 +167,7 @@ function startGame(game) {
   game.powerContext = null;
   game.powerPeekTimeout = null;
   game.skipNextTurn = false;
+  game.readyPlayers = new Set();
 
   for (const p of game.players) {
     p.hand = [];
@@ -177,7 +178,7 @@ function startGame(game) {
 
   const firstDiscard = game.deck.pop();
   game.discardPile.push(firstDiscard);
-  game.state = 'peek';
+  game.state = 'waiting_ready';
 
   for (let i = 0; i < game.players.length; i++) {
     const p = game.players[i];
@@ -188,13 +189,38 @@ function startGame(game) {
       opponentHandSize: op.hand.length,
       topDiscard: c(firstDiscard),
       cardsRemaining: game.deck.length,
+      needsReady: true,
     });
+  }
+}
 
+function handleReady(game, pi) {
+  if (game.state !== 'waiting_ready') return;
+  game.readyPlayers.add(pi);
+
+  for (let i = 0; i < game.players.length; i++) {
+    send(game.players[i].ws, 'player_ready', {
+      player: i === pi ? 'self' : 'opponent',
+      allReady: game.readyPlayers.size >= 2,
+    });
+  }
+
+  if (game.readyPlayers.size >= 2) {
+    startPeek(game);
+  }
+}
+
+function startPeek(game) {
+  game.state = 'peek';
+
+  for (let i = 0; i < game.players.length; i++) {
+    const p = game.players[i];
     send(p.ws, 'initial_peek', {
       cards: [
         { index: 0, card: c(p.hand[0]) },
         { index: 3, card: c(p.hand[3]) },
       ],
+      duration: PEEK_DURATION,
     });
   }
 
@@ -283,7 +309,6 @@ function discardAndProcess(game, card) {
     const pi = game.currentTurn;
     const oi = opponentOf(pi);
 
-    // Automatic powers: execute immediately, no player input needed
     if (power === 'deck_give') {
       const drawn = drawFromDeck(game);
       if (drawn) {
@@ -327,7 +352,6 @@ function discardAndProcess(game, card) {
       return;
     }
 
-    // Ace peek all: auto-send all cards, then auto-advance after 5s
     if (power === 'ace_peek_all') {
       const allCards = [];
       for (let i = 0; i < game.players.length; i++) {
@@ -351,7 +375,6 @@ function discardAndProcess(game, card) {
       return;
     }
 
-    // Interactive powers: set turnPhase, wait for player input
     if (power === 'joker_discard2') {
       const selectionsLeft = Math.min(2, activeHandSize(game.players[pi].hand));
       game.powerContext = { power, card, selectionsLeft };
@@ -432,7 +455,7 @@ function handleCreateRoom(ws, data) {
     cambioCallerIndex: null, turnsRemaining: null,
     snapWindow: false, snapTimeout: null, peekTimeout: null,
     disconnectTimeout: null, powerContext: null, powerPeekTimeout: null,
-    skipNextTurn: false,
+    skipNextTurn: false, readyPlayers: new Set(),
   };
 
   rooms.set(roomCode, game);
@@ -461,7 +484,7 @@ function handleJoinRoom(ws, data) {
   });
   send(game.players[0].ws, 'player_joined', { playerName });
 
-  startGame(game);
+  dealAndWaitForReady(game);
 }
 
 function handleReconnect(ws, data) {
@@ -667,34 +690,39 @@ function handleKingDecide(game, pi, doSwap, myIndex) {
   finishPowerAndSnap(game);
 }
 
-function handleSnap(game, pi, handIndex) {
+function handleSnap(game, pi, handIndex, targetPlayer) {
   const p = game.players[pi];
   if (!game.snapWindow) return sendError(p.ws, 'No snap window');
-  if (!Number.isInteger(handIndex) || handIndex < 0 || handIndex >= p.hand.length || p.hand[handIndex] === null) {
+
+  const target = targetPlayer === 'opponent' ? opponentOf(pi) : pi;
+  const targetHand = game.players[target].hand;
+
+  if (!Number.isInteger(handIndex) || handIndex < 0 || handIndex >= targetHand.length || targetHand[handIndex] === null) {
     return sendError(p.ws, 'Invalid hand index');
   }
 
   const td = topDiscard(game);
   if (!td) return sendError(p.ws, 'No discard');
 
-  const snappedCard = p.hand[handIndex];
+  const snappedCard = targetHand[handIndex];
   const success = snappedCard.value === td.value;
 
   if (success) {
-    p.hand[handIndex] = null;
+    targetHand[handIndex] = null;
     game.discardPile.push(snappedCard);
 
     for (let i = 0; i < game.players.length; i++) {
       send(game.players[i].ws, 'snap_result', {
         success: true,
         player: i === pi ? 'self' : 'opponent',
+        targetPlayer: i === target ? 'self' : 'opponent',
         index: handIndex,
         card: c(snappedCard),
         topDiscard: topDiscard(game) ? c(topDiscard(game)) : null,
       });
     }
 
-    if (activeHandSize(p.hand) === 0) {
+    if (activeHandSize(targetHand) === 0) {
       if (game.snapTimeout) { clearTimeout(game.snapTimeout); game.snapTimeout = null; }
       game.snapWindow = false;
       endGame(game);
@@ -708,6 +736,7 @@ function handleSnap(game, pi, handIndex) {
       send(game.players[i].ws, 'snap_result', {
         success: false,
         player: i === pi ? 'self' : 'opponent',
+        targetPlayer: i === target ? 'self' : 'opponent',
         index: handIndex,
         card: c(snappedCard),
         penaltyIndex: penalty ? p.hand.length - 1 : null,
@@ -750,7 +779,7 @@ function handlePlayAgain(game, ws) {
   game._playAgainVotes.add(pi);
   if (game._playAgainVotes.size >= 2) {
     game._playAgainVotes = null;
-    startGame(game);
+    dealAndWaitForReady(game);
   }
 }
 
@@ -921,6 +950,7 @@ function handleMessage(ws, raw) {
   if (!game || pi === -1) return sendError(ws, 'Not in a game');
 
   if (type === 'play_again') return handlePlayAgain(game, ws);
+  if (type === 'ready') return handleReady(game, pi);
 
   if (game.state !== 'playing' && game.state !== 'cambio_round') {
     return sendError(ws, 'Game is not in a playable state');
@@ -963,7 +993,7 @@ function handleMessage(ws, raw) {
     case 'king_decide':
       return handleKingDecide(game, pi, msg.doSwap, msg.myIndex);
     case 'snap':
-      return handleSnap(game, pi, msg.index !== undefined ? msg.index : msg.handIndex);
+      return handleSnap(game, pi, msg.index !== undefined ? msg.index : msg.handIndex, msg.target);
     case 'call_cambio':
       return handleCallCambio(game, pi);
     case 'joker_select':

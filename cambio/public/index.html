@@ -488,7 +488,9 @@ html, body {
     ----<span class="copy-hint">tap to copy</span>
   </div>
   <div class="waiting-mode" id="waiting-mode">Classic</div>
-  <div class="waiting-text">Waiting for opponent<span class="waiting-dots"></span></div>
+  <div class="waiting-text" id="waiting-text">Waiting for opponent<span class="waiting-dots"></span></div>
+  <button class="btn btn-primary" id="ready-btn" style="display:none; width: auto; padding: 14px 40px; margin-top: 24px; font-size: 1.1rem; letter-spacing: 2px;">READY</button>
+  <div class="waiting-text" id="ready-status" style="display:none; margin-top: 12px; font-size: 0.85rem;"></div>
   <button class="waiting-back" id="waiting-back-btn">Back to lobby</button>
 </div>
 
@@ -1266,10 +1268,18 @@ function renderHand(who) {
         el.addEventListener('click', () => {
           const rect = el.getBoundingClientRect();
           FX.addRipple(rect.left + rect.width / 2, rect.top + rect.height / 2, '255, 80, 80');
-          wsSend({ type: 'snap', index: i });
+          wsSend({ type: 'snap', index: i, target: 'self' });
         });
       }
     } else {
+      if (S.snapWindowOpen && !slot.removed) {
+        el.classList.add('glow-snap', 'clickable');
+        el.addEventListener('click', () => {
+          const rect = el.getBoundingClientRect();
+          FX.addRipple(rect.left + rect.width / 2, rect.top + rect.height / 2, '255, 80, 80');
+          wsSend({ type: 'snap', index: i, target: 'opponent' });
+        });
+      }
       if (canClickOpp(i)) {
         el.classList.add('clickable');
         if (S.activePower && S.activePower.type === '2_steal') el.classList.add('glow-gold');
@@ -1373,16 +1383,16 @@ function renderPowerActions() {
 function renderStatus() {
   let text = '';
   if (S.gamePhase === 'peek') { text = 'Memorize your cards!'; }
-  else if (S.snapWindowOpen) { text = 'SNAP! Click a matching card!'; }
+  else if (S.snapWindowOpen) { text = 'SNAP! Click ANY matching card (yours or theirs)!'; }
   else if (S.activePower) {
     const p = S.activePower;
     if (p.type === '7_8') text = 'Peek: click one of your cards';
     else if (p.type === '9_10') text = "Spy: click an opponent's card";
     else if (p.type === 'JQ' && p.step === 1) text = 'Swap: click one of your cards first';
     else if (p.type === 'JQ' && p.step === 2) text = "Swap: now click an opponent's card";
-    else if (p.type === 'K' && p.step === 0) text = "King: click an opponent's card to peek";
-    else if (p.type === 'K' && p.step === 1) text = 'King: swap with your card, or keep?';
-    else if (p.type === 'K' && p.step === 2) text = 'King: click your card to swap';
+    else if (p.type === 'K' && p.step === 0) text = "King: pick an opponent's card to peek at";
+    else if (p.type === 'K' && p.step === 1) text = 'King: swap it with one of yours, or keep both?';
+    else if (p.type === 'K' && p.step === 2) text = '\u{1F447} Tap YOUR card to swap with their card';
     else if (p.type === 'A_peek_all') text = 'Ace! Viewing all cards...';
     else if (p.type === 'JKR_discard2') text = `Joker! Click a card to remove (${p.selectionsLeft} left)`;
     else if (p.type === '2_steal') text = "Steal! Click an opponent's card to take";
@@ -1596,7 +1606,7 @@ function handleMsg(msg) {
       break;
 
     case 'game_start':
-      S.gamePhase = 'playing';
+      S.gamePhase = 'waiting_ready';
       if (msg.mode) S.mode = msg.mode;
       S.playerIndex = msg.yourIndex;
       S.myHand = Array(4).fill(null).map(() => ({ faceUp: false, card: null, removed: false }));
@@ -1608,13 +1618,27 @@ function handleMsg(msg) {
       S.knownCards = {}; S.opponentKnownCards = {};
       S.peekTimers.forEach(t => clearTimeout(t));
       S.peekTimers = [];
-      showScreen('game');
-      render();
+      showScreen('waiting');
+      $('waiting-room-code').firstChild.textContent = S.roomCode || '----';
+      $('waiting-text').style.display = 'none';
+      $('ready-btn').style.display = 'inline-flex';
+      $('ready-status').style.display = 'block';
+      $('ready-status').textContent = 'Press READY when you want to see your cards';
       FX.dealCards(4);
+      break;
+
+    case 'player_ready':
+      if (msg.player === 'opponent' && !msg.allReady) {
+        $('ready-status').textContent = S.opponentName + ' is ready! Press READY to start';
+      }
       break;
 
     case 'initial_peek':
       S.gamePhase = 'peek';
+      showScreen('game');
+      $('ready-btn').style.display = 'none';
+      $('ready-status').style.display = 'none';
+      $('waiting-text').style.display = 'block';
       (msg.cards || []).forEach(c => {
         if (S.myHand[c.index]) {
           S.myHand[c.index].card = c.card;
@@ -1866,18 +1890,21 @@ function handleMsg(msg) {
 
     case 'snap_result': {
       const isSelf = msg.player === 'self';
-      const handArea = $(isSelf ? 'my-hand-area' : 'opponent-hand-area');
-      const rect = handArea ? handArea.getBoundingClientRect() : { left: window.innerWidth / 2, top: window.innerHeight / 2, width: 0, height: 0 };
+      const targetIsSelf = msg.targetPlayer === 'self';
+      const targetArea = $(targetIsSelf ? 'my-hand-area' : 'opponent-hand-area');
+      const rect = targetArea ? targetArea.getBoundingClientRect() : { left: window.innerWidth / 2, top: window.innerHeight / 2, width: 0, height: 0 };
       const snapX = rect.left + rect.width / 2;
       const snapY = rect.top + rect.height / 2;
 
       if (msg.success) {
-        const hand = isSelf ? S.myHand : S.opponentHand;
-        const known = isSelf ? S.knownCards : S.opponentKnownCards;
+        const hand = targetIsSelf ? S.myHand : S.opponentHand;
+        const known = targetIsSelf ? S.knownCards : S.opponentKnownCards;
         if (hand[msg.index]) hand[msg.index].removed = true;
         delete known[msg.index];
         FX.snapExplosion(snapX, snapY, true);
-        toast(isSelf ? 'Snap! Card removed!' : `${S.opponentName} snapped!`, isSelf ? 'success' : 'info');
+        const whoSnapped = isSelf ? 'You' : S.opponentName;
+        const whose = targetIsSelf ? 'your' : (isSelf ? "opponent's" : 'your');
+        toast(`${whoSnapped} snapped ${whose} card!`, isSelf ? 'success' : 'info');
       } else {
         if (isSelf) {
           S.myHand.push({ faceUp: false, card: null, removed: false });
@@ -1980,6 +2007,13 @@ $('join-room-btn').addEventListener('click', () => {
   wsSend({ type: 'join_room', playerName: name, roomCode: code });
 });
 
+$('ready-btn').addEventListener('click', () => {
+  wsSend({ type: 'ready' });
+  $('ready-btn').disabled = true;
+  $('ready-btn').textContent = 'WAITING...';
+  $('ready-status').textContent = 'Waiting for opponent to ready up...';
+});
+
 $('player-name').addEventListener('keydown', e => { if (e.key === 'Enter') $('create-room-btn').click(); });
 $('room-code-input').addEventListener('keydown', e => { if (e.key === 'Enter') $('join-room-btn').click(); });
 
@@ -2002,6 +2036,8 @@ $('play-again-btn').addEventListener('click', () => {
   S.knownCards = {}; S.opponentKnownCards = {};
   S.peekTimers.forEach(t => clearTimeout(t));
   S.peekTimers = [];
+  $('ready-btn').disabled = false;
+  $('ready-btn').textContent = 'READY';
   toast('Waiting for opponent...', 'info');
 });
 
