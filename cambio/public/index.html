@@ -670,13 +670,6 @@ const FX = (() => {
     }
   }
 
-  function loop(t) {
-    drawBackground(t);
-    drawFx(t);
-    requestAnimationFrame(loop);
-  }
-  requestAnimationFrame(loop);
-
   // --- Public API ---
 
   function addRipple(x, y, color) {
@@ -1122,7 +1115,238 @@ const FX = (() => {
     }, totalDelay);
   }
 
-  return { addRipple, snapExplosion, cambioCinematic, cardDeal, dealCards, scoreReveal };
+  // #1 Card flip shine
+  function cardFlipShine(x, y, w, h) {
+    fxItems.push({
+      x: x - w * 0.3, y, w, h, progress: 0,
+      update(ctx) {
+        this.progress += 0.06;
+        const px = this.x + this.w * 1.6 * this.progress;
+        const alpha = Math.sin(this.progress * Math.PI) * 0.5;
+        const grad = ctx.createLinearGradient(px - 15, this.y - this.h / 2, px + 15, this.y + this.h / 2);
+        grad.addColorStop(0, 'transparent');
+        grad.addColorStop(0.4, `rgba(255, 255, 255, ${alpha})`);
+        grad.addColorStop(0.6, `rgba(255, 255, 255, ${alpha * 0.6})`);
+        grad.addColorStop(1, 'transparent');
+        ctx.fillStyle = grad;
+        ctx.fillRect(this.x, this.y - this.h / 2, this.w, this.h);
+        return this.progress >= 1;
+      }
+    });
+  }
+
+  // #2 Turn indicator vignette
+  let turnGlow = 0;
+  let isMyTurnActive = false;
+  function setTurnGlow(active) { isMyTurnActive = active; }
+
+  // injected into bg loop
+  const origDrawBg = drawBackground;
+  function drawBackgroundWithTurn(t) {
+    origDrawBg(t);
+    if (isMyTurnActive) {
+      turnGlow = Math.min(1, turnGlow + 0.03);
+    } else {
+      turnGlow = Math.max(0, turnGlow - 0.03);
+    }
+    if (turnGlow > 0) {
+      const pulse = 0.5 + 0.5 * Math.sin(t * 0.003);
+      const a = turnGlow * (0.06 + pulse * 0.04);
+      const grad = bgCtx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.2, W / 2, H / 2, Math.max(W, H) * 0.7);
+      grad.addColorStop(0, 'transparent');
+      grad.addColorStop(0.7, 'transparent');
+      grad.addColorStop(1, `rgba(80, 220, 100, ${a})`);
+      bgCtx.fillStyle = grad;
+      bgCtx.fillRect(0, 0, W, H);
+    }
+  }
+
+  // #3 Discard thud
+  function discardThud(x, y) {
+    fxItems.push({
+      x, y, radius: 5, alpha: 0.5, life: 25, age: 0,
+      update(ctx) {
+        this.age++;
+        this.radius += 3;
+        this.alpha = 0.5 * (1 - this.age / this.life);
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+        ctx.strokeStyle = `rgba(212, 168, 67, ${this.alpha})`;
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        return this.age >= this.life;
+      }
+    });
+    // micro bounce
+    document.body.style.transform = 'translateY(-2px)';
+    setTimeout(() => { document.body.style.transform = ''; }, 100);
+  }
+
+  // #4 Peek X-ray scanlines
+  function peekXray(x, y, w, h, duration) {
+    const endTime = Date.now() + (duration || 3000);
+    fxItems.push({
+      x, y, w, h, endTime, scanY: 0,
+      update(ctx) {
+        if (Date.now() > this.endTime) return true;
+        this.scanY = (this.scanY + 2) % this.h;
+        const a = 0.15;
+        for (let i = 0; i < 4; i++) {
+          const sy = this.y + ((this.scanY + i * this.h / 4) % this.h);
+          ctx.strokeStyle = `rgba(80, 220, 100, ${a})`;
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(this.x, sy);
+          ctx.lineTo(this.x + this.w, sy);
+          ctx.stroke();
+        }
+        // edge glow
+        ctx.strokeStyle = `rgba(80, 220, 100, 0.2)`;
+        ctx.lineWidth = 1;
+        ctx.strokeRect(this.x + 1, this.y + 1, this.w - 2, this.h - 2);
+        return false;
+      }
+    });
+  }
+
+  // #5 Snap countdown ring
+  let snapRingActive = false;
+  let snapRingStart = 0;
+  let snapRingDuration = 5000;
+  let snapRingX = 0, snapRingY = 0;
+
+  function startSnapRing(x, y, duration) {
+    snapRingActive = true;
+    snapRingStart = Date.now();
+    snapRingDuration = duration || 5000;
+    snapRingX = x;
+    snapRingY = y;
+  }
+  function stopSnapRing() { snapRingActive = false; }
+
+  // injected into fx loop
+  const origDrawFx = drawFx;
+  function drawFxWithExtras(t) {
+    origDrawFx(t);
+    // snap countdown ring
+    if (snapRingActive) {
+      const elapsed = Date.now() - snapRingStart;
+      const remaining = Math.max(0, 1 - elapsed / snapRingDuration);
+      if (remaining <= 0) { snapRingActive = false; return; }
+      const radius = 45;
+      const startAngle = -Math.PI / 2;
+      const endAngle = startAngle + Math.PI * 2 * remaining;
+      const urgency = remaining < 0.3 ? (1 + Math.sin(t * 0.02) * 0.3) : 1;
+      const r = remaining < 0.3 ? 255 : 212;
+      const g = remaining < 0.3 ? 80 : 168;
+      const b = remaining < 0.3 ? 80 : 67;
+      fxCtx.beginPath();
+      fxCtx.arc(snapRingX, snapRingY, radius, startAngle, endAngle);
+      fxCtx.strokeStyle = `rgba(${r}, ${g}, ${b}, ${0.6 * urgency})`;
+      fxCtx.lineWidth = 3;
+      fxCtx.lineCap = 'round';
+      fxCtx.stroke();
+    }
+  }
+
+  // #6 Loss rain
+  function lossRain() {
+    for (let i = 0; i < 20; i++) {
+      fxItems.push({
+        x: Math.random() * W,
+        y: -20 - Math.random() * 200,
+        vy: 1.5 + Math.random() * 2,
+        vx: (Math.random() - 0.5) * 0.5,
+        rot: Math.random() * Math.PI * 2,
+        rotSpeed: (Math.random() - 0.5) * 0.03,
+        alpha: 0.4 + Math.random() * 0.3,
+        life: 150 + Math.random() * 100,
+        age: 0,
+        update(ctx) {
+          this.age++;
+          this.y += this.vy;
+          this.x += this.vx;
+          this.rot += this.rotSpeed;
+          this.alpha = Math.max(0, this.alpha * (1 - this.age / this.life));
+          ctx.save();
+          ctx.translate(this.x, this.y);
+          ctx.rotate(this.rot);
+          ctx.fillStyle = `rgba(26, 39, 68, ${this.alpha})`;
+          ctx.fillRect(-12, -17, 24, 34);
+          ctx.strokeStyle = `rgba(255, 255, 255, ${this.alpha * 0.15})`;
+          ctx.strokeRect(-12, -17, 24, 34);
+          ctx.restore();
+          return this.age >= this.life;
+        }
+      });
+    }
+  }
+
+  // #7 Opponent action pulse
+  function opponentActionPulse(type) {
+    const colors = {
+      draw: [212, 168, 67],
+      swap: [80, 220, 100],
+      discard: [200, 200, 200],
+    };
+    const col = colors[type] || [200, 200, 200];
+    fxItems.push({
+      alpha: 0.3, age: 0, life: 20,
+      update(ctx) {
+        this.age++;
+        this.alpha = 0.3 * (1 - this.age / this.life);
+        const grad = ctx.createLinearGradient(0, 0, 0, H * 0.15);
+        grad.addColorStop(0, `rgba(${col[0]}, ${col[1]}, ${col[2]}, ${this.alpha})`);
+        grad.addColorStop(1, 'transparent');
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, W, H * 0.15);
+        return this.age >= this.life;
+      }
+    });
+  }
+
+  // #9 Power activation flash
+  function powerFlash(powerType) {
+    const colors = {
+      '7_8': [80, 220, 100],
+      '9_10': [100, 180, 255],
+      'JQ': [212, 168, 67],
+      'K': [192, 57, 43],
+      'A_peek_all': [255, 255, 255],
+      'JKR_discard2': [212, 168, 67],
+      '2_steal': [255, 100, 100],
+      '3_give': [100, 200, 255],
+      'J_peek_both': [150, 100, 255],
+    };
+    const col = colors[powerType] || [212, 168, 67];
+    fxItems.push({
+      alpha: 0.25, age: 0, life: 25,
+      update(ctx) {
+        this.age++;
+        this.alpha = 0.25 * (1 - this.age / this.life);
+        const grad = ctx.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, Math.max(W, H) * 0.4);
+        grad.addColorStop(0, `rgba(${col[0]}, ${col[1]}, ${col[2]}, ${this.alpha})`);
+        grad.addColorStop(1, 'transparent');
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, W, H);
+        return this.age >= this.life;
+      }
+    });
+  }
+
+  // override loop to use enhanced draw functions
+  function loop(t) {
+    drawBackgroundWithTurn(t);
+    drawFxWithExtras(t);
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+
+  return {
+    addRipple, snapExplosion, cambioCinematic, cardDeal, dealCards, scoreReveal,
+    cardFlipShine, setTurnGlow, discardThud, peekXray,
+    startSnapRing, stopSnapRing, lossRain, opponentActionPulse, powerFlash,
+  };
 })();
 
 
@@ -1659,12 +1883,14 @@ function handleMsg(msg) {
       S.isMyTurn = true;
       S.turnPhase = 'waiting_for_draw';
       S.drawnCard = null; S.drawnSource = null; S.activePower = null;
+      FX.setTurnGlow(true);
       render();
       break;
 
     case 'opponent_turn':
       S.isMyTurn = false;
       S.turnPhase = null;
+      FX.setTurnGlow(false);
       S.drawnCard = null; S.drawnSource = null; S.activePower = null;
       render();
       break;
@@ -1681,6 +1907,7 @@ function handleMsg(msg) {
     case 'opponent_drew':
       if (msg.source === 'discard') S.topDiscard = null;
       if (msg.cardsRemaining !== undefined) S.cardsRemaining = msg.cardsRemaining;
+      FX.opponentActionPulse('draw');
       render();
       break;
 
@@ -1705,7 +1932,14 @@ function handleMsg(msg) {
         }, 800);
       } else {
         delete S.opponentKnownCards[msg.index];
+        FX.opponentActionPulse('swap');
         render();
+      }
+      // thud on discard pile
+      const swapDiscEl = $('discard-pile');
+      if (swapDiscEl) {
+        const r = swapDiscEl.getBoundingClientRect();
+        FX.discardThud(r.left + r.width / 2, r.top + r.height / 2);
       }
       break;
     }
@@ -1714,16 +1948,18 @@ function handleMsg(msg) {
       S.topDiscard = msg.card;
       S.drawnCard = null; S.drawnSource = null;
       if (msg.cardsRemaining !== undefined) S.cardsRemaining = msg.cardsRemaining;
-      // ripple on discard
-      const discEl = $('discard-pile');
-      if (discEl) {
-        const rect = discEl.getBoundingClientRect();
+      // thud + ripple on discard
+      const discEl2 = $('discard-pile');
+      if (discEl2) {
+        const rect = discEl2.getBoundingClientRect();
         FX.addRipple(rect.left + rect.width / 2, rect.top + rect.height / 2, '212, 168, 67');
+        FX.discardThud(rect.left + rect.width / 2, rect.top + rect.height / 2);
       }
       render();
       break;
 
     case 'power_activate':
+      FX.powerFlash(msg.power);
       switch (msg.power) {
         case 'A_peek_all': S.activePower = { type: 'A_peek_all' }; break;
         case 'JKR_discard2': S.activePower = { type: 'JKR_discard2', selectionsLeft: 2, step: 0 }; break;
@@ -1744,6 +1980,19 @@ function handleMsg(msg) {
 
     case 'peek_result':
       peekCard(msg.target, msg.index, msg.card, msg.duration || 3000);
+      // X-ray effect on the peeked card
+      setTimeout(() => {
+        const isSelfPeek = msg.target === 'self';
+        const handArea = $(isSelfPeek ? 'my-hand-area' : 'opponent-hand-area');
+        const cards = handArea ? handArea.querySelectorAll('.card') : [];
+        const labelOffset = 1;
+        const cardEl = cards[msg.index + labelOffset];
+        if (cardEl) {
+          const r = cardEl.getBoundingClientRect();
+          FX.peekXray(r.left, r.top, r.width, r.height, msg.duration || 3000);
+          FX.cardFlipShine(r.left, r.top + r.height / 2, r.width, r.height);
+        }
+      }, 50);
       break;
 
     case 'king_peek_result':
@@ -1885,10 +2134,20 @@ function handleMsg(msg) {
     case 'snap_window':
       S.snapWindowOpen = msg.open;
       if (msg.topDiscard) S.topDiscard = msg.topDiscard;
+      if (msg.open) {
+        const snapDiscEl = $('discard-pile');
+        if (snapDiscEl) {
+          const r = snapDiscEl.getBoundingClientRect();
+          FX.startSnapRing(r.left + r.width / 2, r.top + r.height / 2, 5000);
+        }
+      } else {
+        FX.stopSnapRing();
+      }
       render();
       break;
 
     case 'snap_result': {
+      FX.stopSnapRing();
       const isSelf = msg.player === 'self';
       const targetIsSelf = msg.targetPlayer === 'self';
       const targetArea = $(targetIsSelf ? 'my-hand-area' : 'opponent-hand-area');
@@ -1938,6 +2197,8 @@ function handleMsg(msg) {
 
     case 'game_over':
       S.gamePhase = 'game_over';
+      FX.setTurnGlow(false);
+      if (msg.winner === 'opponent') FX.lossRain();
       FX.scoreReveal(
         null,
         msg.myCards, msg.opponentCards,
