@@ -39,13 +39,23 @@ html, body {
   user-select: none;
 }
 
-.screen { display: none; width: 100%; height: 100%; position: absolute; top: 0; left: 0; }
+#bg-canvas {
+  position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+  z-index: 0; pointer-events: none;
+}
+
+#fx-canvas {
+  position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+  z-index: 50; pointer-events: none;
+}
+
+.screen { display: none; width: 100%; height: 100%; position: absolute; top: 0; left: 0; z-index: 1; }
 .screen.active { display: flex; }
 
 /* ===== LOBBY ===== */
 #lobby-screen {
   flex-direction: column; align-items: center; justify-content: center;
-  background: radial-gradient(ellipse at center, var(--felt-light) 0%, var(--felt-dark) 100%);
+  background: transparent;
 }
 
 .lobby-card {
@@ -114,7 +124,7 @@ html, body {
 /* ===== WAITING ===== */
 #waiting-screen {
   flex-direction: column; align-items: center; justify-content: center;
-  background: radial-gradient(ellipse at center, var(--felt-light) 0%, var(--felt-dark) 100%);
+  background: transparent;
 }
 
 .room-code-display {
@@ -142,7 +152,7 @@ html, body {
 /* ===== GAME ===== */
 #game-screen {
   flex-direction: column;
-  background: radial-gradient(ellipse at 50% 50%, var(--felt-light) 0%, var(--felt) 40%, var(--felt-dark) 100%);
+  background: transparent;
   position: relative;
 }
 
@@ -380,6 +390,7 @@ html, body {
 .gameover-player { text-align: center; }
 .gameover-player-name { font-size: 0.8rem; color: rgba(255,255,255,0.5); margin-bottom: 4px; }
 .gameover-player-score { font-size: 2.2rem; font-weight: 700; }
+.gameover-player-score.counting { transition: none; }
 
 .gameover-hands { display: flex; justify-content: center; gap: 24px; margin: 16px 0; flex-wrap: wrap; }
 .gameover-hand { display: flex; flex-direction: column; align-items: center; gap: 6px; }
@@ -417,13 +428,29 @@ html, body {
   position: fixed; inset: 0; z-index: 90;
   display: none; align-items: center; justify-content: center; pointer-events: none;
 }
-.cambio-announce.active { display: flex; animation: cambioFlash 0.8s ease; }
+.cambio-announce.active { display: flex; }
 .cambio-announce-text {
   font-size: 3rem; font-weight: 800; color: var(--gold);
   text-transform: uppercase; letter-spacing: 8px;
   text-shadow: 0 0 30px rgba(212,168,67,0.6), 0 4px 12px rgba(0,0,0,0.5);
+  opacity: 0;
 }
-@keyframes cambioFlash { 0% { background: rgba(212,168,67,0.15); } 50% { background: rgba(212,168,67,0.08); } 100% { background: transparent; } }
+
+/* ===== SCREEN SHAKE ===== */
+.screen-shake {
+  animation: screenShake 0.4s ease;
+}
+@keyframes screenShake {
+  0%, 100% { transform: translate(0, 0); }
+  10% { transform: translate(-4px, 2px); }
+  20% { transform: translate(4px, -2px); }
+  30% { transform: translate(-3px, -1px); }
+  40% { transform: translate(3px, 1px); }
+  50% { transform: translate(-2px, 2px); }
+  60% { transform: translate(2px, -1px); }
+  70% { transform: translate(-1px, 1px); }
+  80% { transform: translate(1px, -1px); }
+}
 
 @media (max-height: 600px) {
   .game-header { padding: 4px 12px; }
@@ -434,6 +461,9 @@ html, body {
 </style>
 </head>
 <body>
+
+<canvas id="bg-canvas"></canvas>
+<canvas id="fx-canvas"></canvas>
 
 <div id="lobby-screen" class="screen active">
   <div class="lobby-card">
@@ -512,12 +542,589 @@ html, body {
 </div>
 
 <div class="cambio-announce" id="cambio-announce">
-  <div class="cambio-announce-text">CAMBIO!</div>
+  <div class="cambio-announce-text" id="cambio-announce-text">CAMBIO!</div>
 </div>
 
 <div class="toast-container" id="toast-container"></div>
 
 <script>
+// ===== CANVAS FX ENGINE =====
+const FX = (() => {
+  const bgCanvas = document.getElementById('bg-canvas');
+  const bgCtx = bgCanvas.getContext('2d');
+  const fxCanvas = document.getElementById('fx-canvas');
+  const fxCtx = fxCanvas.getContext('2d');
+
+  let W = 0, H = 0;
+  const particles = [];
+  const fxItems = [];
+  const ripples = [];
+  let lightAngle = 0;
+
+  function resize() {
+    const dpr = window.devicePixelRatio || 1;
+    W = window.innerWidth;
+    H = window.innerHeight;
+    bgCanvas.width = W * dpr;
+    bgCanvas.height = H * dpr;
+    bgCanvas.style.width = W + 'px';
+    bgCanvas.style.height = H + 'px';
+    bgCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    fxCanvas.width = W * dpr;
+    fxCanvas.height = H * dpr;
+    fxCanvas.style.width = W + 'px';
+    fxCanvas.style.height = H + 'px';
+    fxCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  window.addEventListener('resize', resize);
+  resize();
+
+  // --- Background: felt + dust motes + light rays ---
+
+  for (let i = 0; i < 40; i++) {
+    particles.push({
+      x: Math.random() * 2000,
+      y: Math.random() * 2000,
+      r: Math.random() * 1.5 + 0.5,
+      vx: (Math.random() - 0.5) * 0.15,
+      vy: (Math.random() - 0.5) * 0.1 - 0.05,
+      alpha: Math.random() * 0.3 + 0.1,
+      pulse: Math.random() * Math.PI * 2,
+    });
+  }
+
+  function drawBackground(t) {
+    const grad = bgCtx.createRadialGradient(W * 0.5, H * 0.5, 0, W * 0.5, H * 0.5, Math.max(W, H) * 0.7);
+    grad.addColorStop(0, '#237a38');
+    grad.addColorStop(0.4, '#1a5c2a');
+    grad.addColorStop(1, '#134620');
+    bgCtx.fillStyle = grad;
+    bgCtx.fillRect(0, 0, W, H);
+
+    // subtle light cone sweeping across felt
+    lightAngle += 0.0003;
+    const lx = W * 0.5 + Math.cos(lightAngle) * W * 0.3;
+    const ly = H * 0.3 + Math.sin(lightAngle * 0.7) * H * 0.15;
+    const lightGrad = bgCtx.createRadialGradient(lx, ly, 0, lx, ly, Math.max(W, H) * 0.5);
+    lightGrad.addColorStop(0, 'rgba(255, 255, 200, 0.03)');
+    lightGrad.addColorStop(0.5, 'rgba(255, 255, 200, 0.01)');
+    lightGrad.addColorStop(1, 'transparent');
+    bgCtx.fillStyle = lightGrad;
+    bgCtx.fillRect(0, 0, W, H);
+
+    // felt texture (subtle noise lines)
+    bgCtx.strokeStyle = 'rgba(0, 0, 0, 0.03)';
+    bgCtx.lineWidth = 0.5;
+    for (let i = 0; i < 60; i++) {
+      const y = (i * 17 + t * 0.002) % H;
+      bgCtx.beginPath();
+      bgCtx.moveTo(0, y);
+      for (let x = 0; x < W; x += 20) {
+        bgCtx.lineTo(x, y + Math.sin(x * 0.01 + i) * 1.5);
+      }
+      bgCtx.stroke();
+    }
+
+    // dust motes
+    particles.forEach(p => {
+      p.x += p.vx;
+      p.y += p.vy;
+      p.pulse += 0.02;
+      if (p.x < -10) p.x = W + 10;
+      if (p.x > W + 10) p.x = -10;
+      if (p.y < -10) p.y = H + 10;
+      if (p.y > H + 10) p.y = -10;
+      const a = p.alpha * (0.6 + 0.4 * Math.sin(p.pulse));
+      bgCtx.beginPath();
+      bgCtx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+      bgCtx.fillStyle = `rgba(255, 255, 220, ${a})`;
+      bgCtx.fill();
+    });
+
+    // ripples
+    for (let i = ripples.length - 1; i >= 0; i--) {
+      const r = ripples[i];
+      r.radius += r.speed;
+      r.alpha -= r.decay;
+      if (r.alpha <= 0) { ripples.splice(i, 1); continue; }
+      bgCtx.beginPath();
+      bgCtx.arc(r.x, r.y, r.radius, 0, Math.PI * 2);
+      bgCtx.strokeStyle = `rgba(${r.color}, ${r.alpha})`;
+      bgCtx.lineWidth = 2;
+      bgCtx.stroke();
+    }
+  }
+
+  // --- FX Layer: explosions, card trails, cambio cinematic ---
+
+  function drawFx(t) {
+    fxCtx.clearRect(0, 0, W, H);
+    for (let i = fxItems.length - 1; i >= 0; i--) {
+      const fx = fxItems[i];
+      if (fx.update(fxCtx, t)) {
+        fxItems.splice(i, 1);
+      }
+    }
+  }
+
+  function loop(t) {
+    drawBackground(t);
+    drawFx(t);
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+
+  // --- Public API ---
+
+  function addRipple(x, y, color) {
+    ripples.push({
+      x, y,
+      radius: 5,
+      speed: 2.5,
+      alpha: 0.4,
+      decay: 0.008,
+      color: color || '80, 220, 100',
+    });
+    ripples.push({
+      x, y,
+      radius: 5,
+      speed: 1.5,
+      alpha: 0.25,
+      decay: 0.005,
+      color: color || '80, 220, 100',
+    });
+  }
+
+  function snapExplosion(x, y, success) {
+    const count = success ? 35 : 20;
+    const baseColor = success ? [80, 220, 100] : [220, 60, 50];
+    for (let i = 0; i < count; i++) {
+      const angle = (Math.PI * 2 * i) / count + (Math.random() - 0.5) * 0.5;
+      const speed = success ? (3 + Math.random() * 5) : (2 + Math.random() * 3);
+      const size = success ? (2 + Math.random() * 4) : (1.5 + Math.random() * 2.5);
+      const spark = {
+        x, y,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed - (success ? 1 : 0),
+        size,
+        alpha: 1,
+        color: baseColor,
+        gravity: 0.08,
+        trail: [],
+        update(ctx) {
+          this.trail.push({ x: this.x, y: this.y, alpha: this.alpha * 0.5 });
+          if (this.trail.length > 6) this.trail.shift();
+
+          this.vx *= 0.97;
+          this.vy *= 0.97;
+          this.vy += this.gravity;
+          this.x += this.vx;
+          this.y += this.vy;
+          this.alpha -= 0.02;
+          this.size *= 0.98;
+
+          // trail
+          this.trail.forEach((tp, idx) => {
+            const ta = tp.alpha * (idx / this.trail.length) * 0.6;
+            ctx.beginPath();
+            ctx.arc(tp.x, tp.y, this.size * 0.6, 0, Math.PI * 2);
+            ctx.fillStyle = `rgba(${this.color[0]}, ${this.color[1]}, ${this.color[2]}, ${ta})`;
+            ctx.fill();
+          });
+
+          // main spark
+          ctx.beginPath();
+          ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+          ctx.fillStyle = `rgba(${this.color[0]}, ${this.color[1]}, ${this.color[2]}, ${this.alpha})`;
+          ctx.fill();
+
+          // bright core
+          ctx.beginPath();
+          ctx.arc(this.x, this.y, this.size * 0.4, 0, Math.PI * 2);
+          ctx.fillStyle = `rgba(255, 255, 255, ${this.alpha * 0.8})`;
+          ctx.fill();
+
+          return this.alpha <= 0;
+        }
+      };
+      fxItems.push(spark);
+    }
+
+    // flash ring
+    if (success) {
+      fxItems.push({
+        x, y, radius: 10, alpha: 0.8, maxRadius: 120,
+        update(ctx) {
+          this.radius += 4;
+          this.alpha -= 0.025;
+          ctx.beginPath();
+          ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+          ctx.strokeStyle = `rgba(80, 220, 100, ${this.alpha})`;
+          ctx.lineWidth = 3;
+          ctx.stroke();
+          return this.alpha <= 0;
+        }
+      });
+    }
+
+    addRipple(x, y, success ? '80, 220, 100' : '220, 60, 50');
+  }
+
+  function cambioCinematic() {
+    const textEl = document.getElementById('cambio-announce-text');
+    const announce = document.getElementById('cambio-announce');
+    announce.classList.add('active');
+    textEl.style.opacity = '0';
+    textEl.style.transform = 'scale(0.3)';
+    textEl.style.transition = 'none';
+
+    // golden particle burst from center
+    const cx = W / 2, cy = H / 2;
+    for (let i = 0; i < 60; i++) {
+      const angle = (Math.PI * 2 * i) / 60;
+      const speed = 2 + Math.random() * 6;
+      const size = 1.5 + Math.random() * 3;
+      fxItems.push({
+        x: cx, y: cy,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        size, alpha: 1, life: 80 + Math.random() * 40,
+        age: 0,
+        update(ctx) {
+          this.age++;
+          this.x += this.vx;
+          this.y += this.vy;
+          this.vx *= 0.98;
+          this.vy *= 0.98;
+          this.alpha = Math.max(0, 1 - this.age / this.life);
+          const glow = this.size * 3;
+          const g = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, glow);
+          g.addColorStop(0, `rgba(212, 168, 67, ${this.alpha * 0.6})`);
+          g.addColorStop(1, 'transparent');
+          ctx.fillStyle = g;
+          ctx.fillRect(this.x - glow, this.y - glow, glow * 2, glow * 2);
+          ctx.beginPath();
+          ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+          ctx.fillStyle = `rgba(255, 220, 120, ${this.alpha})`;
+          ctx.fill();
+          return this.age >= this.life;
+        }
+      });
+    }
+
+    // card silhouettes flying outward
+    for (let i = 0; i < 8; i++) {
+      const angle = (Math.PI * 2 * i) / 8 + Math.random() * 0.3;
+      const speed = 1.5 + Math.random() * 2;
+      const rotSpeed = (Math.random() - 0.5) * 0.1;
+      fxItems.push({
+        x: cx, y: cy,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        rot: Math.random() * Math.PI * 2,
+        rotSpeed,
+        alpha: 0.7, life: 100, age: 0,
+        update(ctx) {
+          this.age++;
+          this.x += this.vx;
+          this.y += this.vy;
+          this.rot += this.rotSpeed;
+          this.alpha = Math.max(0, 0.7 * (1 - this.age / this.life));
+          ctx.save();
+          ctx.translate(this.x, this.y);
+          ctx.rotate(this.rot);
+          ctx.fillStyle = `rgba(26, 39, 68, ${this.alpha})`;
+          ctx.strokeStyle = `rgba(212, 168, 67, ${this.alpha * 0.5})`;
+          ctx.lineWidth = 1;
+          const cw = 30, ch = 44;
+          const r = 4;
+          ctx.beginPath();
+          ctx.moveTo(-cw/2 + r, -ch/2);
+          ctx.lineTo(cw/2 - r, -ch/2);
+          ctx.quadraticCurveTo(cw/2, -ch/2, cw/2, -ch/2 + r);
+          ctx.lineTo(cw/2, ch/2 - r);
+          ctx.quadraticCurveTo(cw/2, ch/2, cw/2 - r, ch/2);
+          ctx.lineTo(-cw/2 + r, ch/2);
+          ctx.quadraticCurveTo(-cw/2, ch/2, -cw/2, ch/2 - r);
+          ctx.lineTo(-cw/2, -ch/2 + r);
+          ctx.quadraticCurveTo(-cw/2, -ch/2, -cw/2 + r, -ch/2);
+          ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
+          ctx.restore();
+          return this.age >= this.life;
+        }
+      });
+    }
+
+    // screen flash
+    fxItems.push({
+      alpha: 0.3, age: 0, life: 30,
+      update(ctx) {
+        this.age++;
+        this.alpha = 0.3 * (1 - this.age / this.life);
+        ctx.fillStyle = `rgba(212, 168, 67, ${this.alpha})`;
+        ctx.fillRect(0, 0, W, H);
+        return this.age >= this.life;
+      }
+    });
+
+    // text animation
+    requestAnimationFrame(() => {
+      textEl.style.transition = 'opacity 0.3s ease, transform 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275)';
+      textEl.style.opacity = '1';
+      textEl.style.transform = 'scale(1)';
+    });
+
+    setTimeout(() => {
+      textEl.style.transition = 'opacity 0.5s ease, transform 0.5s ease';
+      textEl.style.opacity = '0';
+      textEl.style.transform = 'scale(1.2)';
+      setTimeout(() => announce.classList.remove('active'), 600);
+    }, 2000);
+  }
+
+  function cardDeal(fromX, fromY, toX, toY, delay) {
+    setTimeout(() => {
+      fxItems.push({
+        x: fromX, y: fromY, toX, toY,
+        progress: 0, alpha: 0.8,
+        update(ctx) {
+          this.progress += 0.04;
+          const p = Math.min(1, this.progress);
+          const ease = 1 - Math.pow(1 - p, 3);
+          const cx = this.x + (this.toX - this.x) * ease;
+          const cy = this.y + (this.toY - this.y) * ease - Math.sin(ease * Math.PI) * 30;
+          this.alpha = p < 0.8 ? 0.8 : 0.8 * (1 - (p - 0.8) / 0.2);
+
+          ctx.save();
+          ctx.translate(cx, cy);
+          ctx.rotate(ease * Math.PI * 0.5);
+
+          // card shadow
+          ctx.fillStyle = `rgba(0, 0, 0, ${this.alpha * 0.3})`;
+          ctx.fillRect(-22, -30, 44, 62);
+
+          // card body
+          ctx.fillStyle = `rgba(26, 39, 68, ${this.alpha})`;
+          ctx.strokeStyle = `rgba(255, 255, 255, ${this.alpha * 0.15})`;
+          ctx.lineWidth = 1;
+          const r = 4;
+          ctx.beginPath();
+          ctx.moveTo(-20 + r, -28);
+          ctx.lineTo(20 - r, -28);
+          ctx.quadraticCurveTo(20, -28, 20, -28 + r);
+          ctx.lineTo(20, 28 - r);
+          ctx.quadraticCurveTo(20, 28, 20 - r, 28);
+          ctx.lineTo(-20 + r, 28);
+          ctx.quadraticCurveTo(-20, 28, -20, 28 - r);
+          ctx.lineTo(-20, -28 + r);
+          ctx.quadraticCurveTo(-20, -28, -20 + r, -28);
+          ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
+
+          ctx.restore();
+
+          // motion trail
+          if (p < 0.7) {
+            addRipple(cx, cy, '212, 168, 67');
+          }
+
+          return p >= 1;
+        }
+      });
+    }, delay || 0);
+  }
+
+  function dealCards(handSize) {
+    const cx = W / 2;
+    const cy = H / 2;
+    const spacing = Math.min(80, W / (handSize + 1));
+
+    for (let i = 0; i < handSize; i++) {
+      const tx = cx - ((handSize - 1) * spacing) / 2 + i * spacing;
+      // my hand (bottom)
+      cardDeal(cx, cy, tx, H - 80, i * 120);
+      // opponent hand (top)
+      cardDeal(cx, cy, tx, 80, i * 120 + 60);
+    }
+  }
+
+  function scoreReveal(container, myCards, oppCards, myScore, oppScore, playerName, opponentName, winner) {
+    const overlay = document.getElementById('gameover-overlay');
+    const resultEl = document.getElementById('gameover-result');
+    const scoresEl = document.getElementById('gameover-scores');
+    const handsEl = document.getElementById('gameover-hands');
+    const playAgainBtn = document.getElementById('play-again-btn');
+
+    const iWin = winner === 'self';
+    const tie = winner === 'tie';
+
+    resultEl.textContent = '';
+    resultEl.className = 'gameover-result';
+    playAgainBtn.style.opacity = '0';
+
+    // set up score counters at 0
+    scoresEl.innerHTML = `
+      <div class="gameover-player">
+        <div class="gameover-player-name">${playerName}</div>
+        <div class="gameover-player-score counting" id="my-score-counter" style="color:${iWin || tie ? 'var(--gold)' : 'var(--red-suit)'}">0</div>
+      </div>
+      <div class="gameover-player">
+        <div class="gameover-player-name">${opponentName}</div>
+        <div class="gameover-player-score counting" id="opp-score-counter" style="color:${!iWin || tie ? 'var(--gold)' : 'var(--red-suit)'}">0</div>
+      </div>`;
+
+    handsEl.innerHTML = '';
+
+    // build hand containers (cards hidden)
+    const CARD_VALUES = { 'A': 1, '2': 2, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8, '9': 9, '10': 10, 'J': 11, 'Q': 12, 'K': 13, 'Joker': 0 };
+
+    function buildHandSection(label, cards) {
+      const div = document.createElement('div');
+      div.className = 'gameover-hand';
+      div.innerHTML = `<div class="gameover-hand-label">${label}</div>`;
+      const cardsDiv = document.createElement('div');
+      cardsDiv.className = 'gameover-hand-cards';
+      const cardEls = [];
+      (cards || []).forEach(card => {
+        if (card) {
+          const el = makeCard(card, false);
+          cardEls.push(el);
+          cardsDiv.appendChild(el);
+        }
+      });
+      div.appendChild(cardsDiv);
+      handsEl.appendChild(div);
+      return cardEls;
+    }
+
+    const myCardEls = buildHandSection(playerName, myCards);
+    const oppCardEls = buildHandSection(opponentName, oppCards);
+
+    overlay.classList.add('active');
+
+    // sequential card flip with score counting
+    let myRunning = 0, oppRunning = 0;
+    const myCounter = () => document.getElementById('my-score-counter');
+    const oppCounter = () => document.getElementById('opp-score-counter');
+
+    const allFlips = [];
+    const maxLen = Math.max(myCards ? myCards.length : 0, oppCards ? oppCards.length : 0);
+
+    for (let i = 0; i < maxLen; i++) {
+      if (myCards && myCards[i] && myCardEls[i]) {
+        const card = myCards[i];
+        const el = myCardEls[i];
+        const val = CARD_VALUES[card.rank] || 0;
+        allFlips.push({ el, val, counter: 'my', card });
+      }
+      if (oppCards && oppCards[i] && oppCardEls[i]) {
+        const card = oppCards[i];
+        const el = oppCardEls[i];
+        const val = CARD_VALUES[card.rank] || 0;
+        allFlips.push({ el, val, counter: 'opp', card });
+      }
+    }
+
+    allFlips.forEach((flip, idx) => {
+      setTimeout(() => {
+        flip.el.classList.add('flipped');
+
+        if (flip.counter === 'my') {
+          myRunning += flip.val;
+          const el = myCounter();
+          if (el) el.textContent = myRunning;
+        } else {
+          oppRunning += flip.val;
+          const el = oppCounter();
+          if (el) el.textContent = oppRunning;
+        }
+
+        // spark on each flip
+        const rect = flip.el.getBoundingClientRect();
+        const cx = rect.left + rect.width / 2;
+        const cy = rect.top + rect.height / 2;
+        for (let j = 0; j < 6; j++) {
+          const angle = Math.random() * Math.PI * 2;
+          const speed = 1 + Math.random() * 2;
+          fxItems.push({
+            x: cx, y: cy,
+            vx: Math.cos(angle) * speed,
+            vy: Math.sin(angle) * speed,
+            size: 1 + Math.random() * 1.5,
+            alpha: 0.8, color: [212, 168, 67],
+            update(ctx) {
+              this.x += this.vx;
+              this.y += this.vy;
+              this.alpha -= 0.03;
+              ctx.beginPath();
+              ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+              ctx.fillStyle = `rgba(${this.color[0]}, ${this.color[1]}, ${this.color[2]}, ${this.alpha})`;
+              ctx.fill();
+              return this.alpha <= 0;
+            }
+          });
+        }
+      }, 400 + idx * 350);
+    });
+
+    // final score correction + result text
+    const totalDelay = 400 + allFlips.length * 350 + 300;
+    setTimeout(() => {
+      const mEl = myCounter();
+      const oEl = oppCounter();
+      if (mEl) mEl.textContent = myScore;
+      if (oEl) oEl.textContent = oppScore;
+
+      resultEl.textContent = tie ? 'Tie Game!' : iWin ? 'You Win!' : 'You Lose';
+      resultEl.className = `gameover-result ${tie ? 'tie' : iWin ? 'win' : 'lose'}`;
+
+      if (iWin) {
+        for (let i = 0; i < 40; i++) {
+          const angle = Math.random() * Math.PI * 2;
+          const speed = 2 + Math.random() * 4;
+          fxItems.push({
+            x: W / 2 + (Math.random() - 0.5) * 200,
+            y: H / 2 + (Math.random() - 0.5) * 100,
+            vx: Math.cos(angle) * speed,
+            vy: Math.sin(angle) * speed - 2,
+            size: 2 + Math.random() * 3,
+            alpha: 1,
+            color: [
+              [212, 168, 67],
+              [80, 220, 100],
+              [255, 255, 255],
+            ][Math.floor(Math.random() * 3)],
+            gravity: 0.06,
+            update(ctx) {
+              this.x += this.vx;
+              this.y += this.vy;
+              this.vy += this.gravity;
+              this.alpha -= 0.012;
+              this.size *= 0.995;
+              ctx.beginPath();
+              ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+              ctx.fillStyle = `rgba(${this.color[0]}, ${this.color[1]}, ${this.color[2]}, ${this.alpha})`;
+              ctx.fill();
+              return this.alpha <= 0;
+            }
+          });
+        }
+      }
+
+      playAgainBtn.style.transition = 'opacity 0.4s ease';
+      playAgainBtn.style.opacity = '1';
+    }, totalDelay);
+  }
+
+  return { addRipple, snapExplosion, cambioCinematic, cardDeal, dealCards, scoreReveal };
+})();
+
+
+// ===== GAME STATE =====
 const S = {
   ws: null,
   clientId: localStorage.getItem('cambio_clientId'),
@@ -656,7 +1263,11 @@ function renderHand(who) {
       }
       if (S.snapWindowOpen && !slot.removed) {
         el.classList.add('glow-snap', 'clickable');
-        el.addEventListener('click', () => wsSend({ type: 'snap', index: i }));
+        el.addEventListener('click', () => {
+          const rect = el.getBoundingClientRect();
+          FX.addRipple(rect.left + rect.width / 2, rect.top + rect.height / 2, '255, 80, 80');
+          wsSend({ type: 'snap', index: i });
+        });
       }
     } else {
       if (canClickOpp(i)) {
@@ -677,7 +1288,11 @@ function renderPiles() {
   if (S.cardsRemaining > 0) {
     const card = makeCard(null, false);
     card.classList.add('clickable');
-    if (canDraw()) card.addEventListener('click', () => wsSend({ type: 'draw', source: 'pile' }));
+    if (canDraw()) card.addEventListener('click', () => {
+      const rect = dp.getBoundingClientRect();
+      FX.addRipple(rect.left + rect.width / 2, rect.top + rect.height / 2, '212, 168, 67');
+      wsSend({ type: 'draw', source: 'pile' });
+    });
     else card.classList.remove('clickable');
     dp.appendChild(card);
   }
@@ -690,7 +1305,11 @@ function renderPiles() {
     const card = makeCard(S.topDiscard, true);
     if (canDraw() && S.topDiscard) {
       card.classList.add('clickable');
-      card.addEventListener('click', () => wsSend({ type: 'draw', source: 'discard' }));
+      card.addEventListener('click', () => {
+        const rect = disc.getBoundingClientRect();
+        FX.addRipple(rect.left + rect.width / 2, rect.top + rect.height / 2, '212, 168, 67');
+        wsSend({ type: 'draw', source: 'discard' });
+      });
     }
     disc.appendChild(card);
   } else {
@@ -991,6 +1610,7 @@ function handleMsg(msg) {
       S.peekTimers = [];
       showScreen('game');
       render();
+      FX.dealCards(4);
       break;
 
     case 'initial_peek':
@@ -1048,6 +1668,12 @@ function handleMsg(msg) {
           S.myHand[msg.index].faceUp = true;
         }
         S.drawnCard = null; S.drawnSource = null;
+        // ripple on swap
+        const swapArea = $('my-hand-area');
+        if (swapArea) {
+          const rect = swapArea.getBoundingClientRect();
+          FX.addRipple(rect.left + rect.width / 2, rect.top + rect.height / 2, '80, 220, 100');
+        }
         render();
         setTimeout(() => {
           if (S.myHand[msg.index]) S.myHand[msg.index].faceUp = false;
@@ -1064,6 +1690,12 @@ function handleMsg(msg) {
       S.topDiscard = msg.card;
       S.drawnCard = null; S.drawnSource = null;
       if (msg.cardsRemaining !== undefined) S.cardsRemaining = msg.cardsRemaining;
+      // ripple on discard
+      const discEl = $('discard-pile');
+      if (discEl) {
+        const rect = discEl.getBoundingClientRect();
+        FX.addRipple(rect.left + rect.width / 2, rect.top + rect.height / 2, '212, 168, 67');
+      }
       render();
       break;
 
@@ -1234,11 +1866,17 @@ function handleMsg(msg) {
 
     case 'snap_result': {
       const isSelf = msg.player === 'self';
+      const handArea = $(isSelf ? 'my-hand-area' : 'opponent-hand-area');
+      const rect = handArea ? handArea.getBoundingClientRect() : { left: window.innerWidth / 2, top: window.innerHeight / 2, width: 0, height: 0 };
+      const snapX = rect.left + rect.width / 2;
+      const snapY = rect.top + rect.height / 2;
+
       if (msg.success) {
         const hand = isSelf ? S.myHand : S.opponentHand;
         const known = isSelf ? S.knownCards : S.opponentKnownCards;
         if (hand[msg.index]) hand[msg.index].removed = true;
         delete known[msg.index];
+        FX.snapExplosion(snapX, snapY, true);
         toast(isSelf ? 'Snap! Card removed!' : `${S.opponentName} snapped!`, isSelf ? 'success' : 'info');
       } else {
         if (isSelf) {
@@ -1248,6 +1886,9 @@ function handleMsg(msg) {
           S.opponentHand.push({ faceUp: false, card: null, removed: false });
           toast(`${S.opponentName} wrong snap!`, 'info');
         }
+        FX.snapExplosion(snapX, snapY, false);
+        document.body.classList.add('screen-shake');
+        setTimeout(() => document.body.classList.remove('screen-shake'), 400);
       }
       if (msg.topDiscard) S.topDiscard = msg.topDiscard;
       S.snapWindowOpen = false;
@@ -1258,9 +1899,7 @@ function handleMsg(msg) {
     case 'cambio_called': {
       const caller = msg.player === 'self' ? 'You' : S.opponentName;
       S.gamePhase = 'cambio_round';
-      const ann = $('cambio-announce');
-      ann.classList.add('active');
-      setTimeout(() => ann.classList.remove('active'), 2000);
+      FX.cambioCinematic();
       toast(`${caller} called Cambio!`, 'info');
       render();
       break;
@@ -1272,7 +1911,13 @@ function handleMsg(msg) {
 
     case 'game_over':
       S.gamePhase = 'game_over';
-      showGameOver(msg);
+      FX.scoreReveal(
+        null,
+        msg.myCards, msg.opponentCards,
+        msg.myScore, msg.opponentScore,
+        S.playerName || 'You', S.opponentName,
+        msg.winner
+      );
       break;
 
     case 'opponent_disconnected':
@@ -1311,45 +1956,6 @@ function handleMsg(msg) {
       toast(msg.message || 'Something went wrong', 'error');
       break;
   }
-}
-
-// ===== GAME OVER =====
-
-function showGameOver(msg) {
-  const overlay = $('gameover-overlay');
-  const resultEl = $('gameover-result');
-  const iWin = msg.winner === 'self';
-  const tie = msg.winner === 'tie';
-
-  resultEl.textContent = tie ? 'Tie Game!' : iWin ? 'You Win!' : 'You Lose';
-  resultEl.className = `gameover-result ${tie ? 'tie' : iWin ? 'win' : 'lose'}`;
-
-  $('gameover-scores').innerHTML = `
-    <div class="gameover-player">
-      <div class="gameover-player-name">${S.playerName || 'You'}</div>
-      <div class="gameover-player-score" style="color:${iWin || tie ? 'var(--gold)' : 'var(--red-suit)'}">${msg.myScore}</div>
-    </div>
-    <div class="gameover-player">
-      <div class="gameover-player-name">${S.opponentName}</div>
-      <div class="gameover-player-score" style="color:${!iWin || tie ? 'var(--gold)' : 'var(--red-suit)'}">${msg.opponentScore}</div>
-    </div>`;
-
-  const handsEl = $('gameover-hands');
-  handsEl.innerHTML = '';
-
-  [{ label: S.playerName || 'You', cards: msg.myCards },
-   { label: S.opponentName, cards: msg.opponentCards }].forEach(h => {
-    const div = document.createElement('div');
-    div.className = 'gameover-hand';
-    div.innerHTML = `<div class="gameover-hand-label">${h.label}</div>`;
-    const cardsDiv = document.createElement('div');
-    cardsDiv.className = 'gameover-hand-cards';
-    (h.cards || []).forEach(card => { if (card) cardsDiv.appendChild(makeCard(card, true)); });
-    div.appendChild(cardsDiv);
-    handsEl.appendChild(div);
-  });
-
-  overlay.classList.add('active');
 }
 
 // ===== LOBBY HANDLERS =====
